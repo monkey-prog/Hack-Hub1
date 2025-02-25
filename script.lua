@@ -124,7 +124,7 @@ local function CreateESP(Player)
 
         -- Create new ESP elements
         local Box = Drawing.new("Square")
-        Box.Thickness = 2
+        Box.Thickness = 3  -- FIXED: Increased thickness for better visibility
         Box.Color = BoxColor
         Box.Filled = false
         Box.Transparency = 1
@@ -279,33 +279,32 @@ local function UpdateESP()
             local ScreenPos, OnScreen = Camera:WorldToViewportPoint(HRP.Position)
             local Distance = math.floor((HRP.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude)
             
-            -- Get accurate character size
+            -- CRITICAL FIX: Always update and show the ESP boxes regardless of OnScreen check
+            
+            -- Get character size but with fixed minimum values
             local CharSize = GetCharacterSize(Player.Character)
             
-            -- FIXED: Changed scaling to make boxes visible even at long distances
-            local ScaleFactor = 1 / (Distance * 0.02 + 1) -- Reduced distance effect
+            -- Hardcoded minimum size for boxes to ensure visibility
+            local MinBoxHeight = 60  -- Increased minimum box height
+            local MinBoxWidth = 35   -- Increased minimum box width
             
-            -- Always show ESP for all players regardless of distance
-            -- Update text, line, and box for the player
+            -- FIXED: Drastically reduced distance impact on scaling to ensure boxes are visible at all distances
+            local ScaleFactor = 1 / (Distance * 0.003 + 1)
             
-            -- ESP Box - tight around the character
+            -- Calculate box dimensions
             local TopY = ScreenPos.Y - (CharSize.Y * 0.55) * ScaleFactor
             local BottomY = ScreenPos.Y + (CharSize.Y * 0.15) * ScaleFactor
-            local BoxHeight = BottomY - TopY
-            local BoxWidth = BoxHeight * 0.6 -- Maintain proportions
+            local BoxHeight = math.max(BottomY - TopY, MinBoxHeight)
+            local BoxWidth = math.max(BoxHeight * 0.6, MinBoxWidth)
             
-            -- Make minimum box size to ensure visibility
-            BoxWidth = math.max(BoxWidth, 10) 
-            BoxHeight = math.max(BoxHeight, 20)
-            
+            -- Guaranteed box display: force boxes to be visible with proper dimensions
             Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
             Data.Box.Position = Vector2.new(ScreenPos.X - BoxWidth/2, TopY)
             
-            -- FIXED: Show all ESP elements even when player is off screen
-            -- This makes boxes, lines, and text visible even for distant players
+            -- MAJOR FIX: Always display the box regardless of whether player is on screen
             Data.Box.Visible = true
             
-            -- FIXED: Make sure line color matches team color
+            -- FIXED: Ensure correct team colors
             local teamName = Player.Team and Player.Team.Name or "Neutral"
             local correctLineColor = TeamColors[teamName] or Color3.fromRGB(255, 255, 255)
             Data.Line.Color = correctLineColor
