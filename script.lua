@@ -1125,7 +1125,6 @@ local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local Dropdown = TeleportTab:CreateDropdown({
    Name = "Teleport Locations",
@@ -1170,22 +1169,24 @@ local Dropdown = TeleportTab:CreateDropdown({
            local character = player.Character or player.CharacterAdded:Wait()
            local humanoid = character:WaitForChild("Humanoid")
            local rootPart = character:WaitForChild("HumanoidRootPart")
-           local camera = game.Workspace.CurrentCamera
            
-           -- Cancel any previous teleport attempts
-           if player:FindFirstChild("TeleportInProgress") then
-               return
+           -- Cancel existing teleport
+           if _G.SafeTeleportActive then
+               _G.SafeTeleportActive = false
+               task.wait(1)
            end
            
-           -- Create marker to prevent multiple teleports
-           local teleportMarker = Instance.new("BoolValue")
-           teleportMarker.Name = "TeleportInProgress"
-           teleportMarker.Parent = player
+           -- Set teleport flag
+           _G.SafeTeleportActive = true
            
-           -- Store original properties
+           -- Store original walk speed
+           local originalWalkSpeed = humanoid.WalkSpeed
+           
+           -- Store original states
+           local originalJumpPower = humanoid.JumpPower
+           local originalAutoRotate = humanoid.AutoRotate
+           local originalPlatformStand = humanoid.PlatformStand
            local originalCanCollide = {}
-           local originalCameraSubject = camera.CameraSubject
-           local originalCameraType = camera.CameraType
            
            for _, part in pairs(character:GetDescendants()) do
                if part:IsA("BasePart") then
@@ -1193,201 +1194,123 @@ local Dropdown = TeleportTab:CreateDropdown({
                end
            end
            
-           -- Function to clean up after teleport
-           local function cleanUp()
-               -- Remove teleport marker
-               if teleportMarker and teleportMarker.Parent then
-                   teleportMarker:Destroy()
+           -- Enable noclip with absolute collision prevention
+           local noclipConnection = RunService.Stepped:Connect(function()
+               if not _G.SafeTeleportActive then return end
+               
+               for _, part in pairs(character:GetDescendants()) do
+                   if part:IsA("BasePart") then
+                       part.CanCollide = false
+                   end
                end
                
-               -- Restore camera
-               camera.CameraType = originalCameraType
-               camera.CameraSubject = originalCameraSubject
+               -- Freeze character physics to prevent movement
+               if rootPart then
+                   rootPart.Velocity = Vector3.new(0, 0, 0)
+                   rootPart.RotVelocity = Vector3.new(0, 0, 0)
+               end
                
-               -- Disconnect noclip
+               -- Pause humanoid states
+               humanoid.PlatformStand = true
+               humanoid.AutoRotate = false
+               humanoid.JumpPower = 0
+               humanoid.WalkSpeed = 0
+           end)
+           
+           -- Function to clean up
+           local function cleanUp()
+               _G.SafeTeleportActive = false
+               
                if noclipConnection then
                    noclipConnection:Disconnect()
                    noclipConnection = nil
                end
                
-               -- Restore original collision settings
-               for part, canCollide in pairs(originalCanCollide) do
-                   if part and part:IsA("BasePart") and part:IsDescendantOf(game) then
-                       part.CanCollide = canCollide
-                   end
+               -- Restore character properties
+               if humanoid and humanoid.Parent then
+                   humanoid.WalkSpeed = originalWalkSpeed
+                   humanoid.JumpPower = originalJumpPower
+                   humanoid.AutoRotate = originalAutoRotate
+                   humanoid.PlatformStand = false
+                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
                end
                
-               -- Re-enable normal character controls
-               if humanoid and humanoid.Parent then
-                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+               -- Restore collision
+               for part, value in pairs(originalCanCollide) do
+                   if part and part:IsA("BasePart") and part:IsDescendantOf(game) then
+                       part.CanCollide = value
+                   end
                end
            end
            
-           -- Distance calculation for waypoints
-           local startPosition = rootPart.Position
-           local totalDistance = (targetPosition - startPosition).Magnitude
-           
-           -- If distance is very large, we'll use waypoints
-           if totalDistance > 300 then
-               -- Create waypoints to avoid detection
-               local waypoints = {}
-               local numWaypoints = math.ceil(totalDistance / 250) -- One waypoint every 250 studs
+           -- Function for extremely slow incremental teleportation
+           local function safeIncrementalTeleport()
+               local startPosition = rootPart.Position
+               local direction = (targetPosition - startPosition).Unit
+               local totalDistance = (targetPosition - startPosition).Magnitude
                
-               for i = 1, numWaypoints do
-                   local t = i / numWaypoints
-                   local waypointPos = startPosition:Lerp(targetPosition, t)
-                   table.insert(waypoints, waypointPos)
-               end
+               -- Very small step size to avoid detection
+               local stepSize = 3 -- 3 studs per step
+               local totalSteps = math.ceil(totalDistance / stepSize)
+               local currentStep = 0
+               local waitTime = 0.05 -- 50ms between steps
                
-               -- Add final destination
-               table.insert(waypoints, targetPosition)
+               -- Set up temporary character state for teleportation
+               humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+               humanoid.PlatformStand = true
                
-               -- Function to teleport to next waypoint
-               local currentWaypoint = 1
-               
-               local function teleportToNextWaypoint()
-                   if currentWaypoint > #waypoints or not teleportMarker.Parent then
+               -- Loop to incrementally teleport
+               local teleportLoop
+               teleportLoop = function()
+                   if not _G.SafeTeleportActive or not rootPart or not rootPart.Parent then
                        cleanUp()
                        return
                    end
                    
-                   local nextPosition = waypoints[currentWaypoint]
+                   -- Calculate current step position
+                   currentStep = currentStep + 1
                    
-                   -- Set up camera for stability during this segment
-                   camera.CameraType = Enum.CameraType.Scriptable
-                   local startCFrame = camera.CFrame
-                   
-                   -- Enable noclip for this segment
-                   if noclipConnection then
-                       noclipConnection:Disconnect()
+                   -- Check if we've completed all steps
+                   if currentStep > totalSteps then
+                       -- Final position adjustment
+                       rootPart.CFrame = CFrame.new(targetPosition)
+                       task.wait(0.1)
+                       cleanUp()
+                       return
                    end
                    
-                   noclipConnection = RunService.Stepped:Connect(function()
-                       for _, part in pairs(character:GetDescendants()) do
-                           if part:IsA("BasePart") then
-                               part.CanCollide = false
-                               -- Prevent character from falling
-                               part.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                               part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                           end
-                       end
-                       
-                       -- Stabilize camera
-                       if camera.CameraType == Enum.CameraType.Scriptable then
-                           camera.CFrame = startCFrame
-                       end
-                   end)
+                   -- Calculate step progress and position
+                   local progress = currentStep / totalSteps
+                   local newPosition = startPosition:Lerp(targetPosition, progress)
                    
-                   -- Calculate safe speed based on segment distance
-                   local segmentDistance = (nextPosition - rootPart.Position).Magnitude
-                   -- Very slow speed to avoid detection - about 20 studs per second maximum
-                   local travelTime = math.max(segmentDistance / 20, 3)
+                   -- Set position
+                   rootPart.CFrame = CFrame.new(newPosition)
                    
-                   -- Create tween info with slight easing for natural movement
-                   local tweenInfo = TweenInfo.new(
-                       travelTime,
-                       Enum.EasingStyle.Sine, -- Slight easing
-                       Enum.EasingDirection.InOut,
-                       0, -- No repeat
-                       false, -- Don't reverse
-                       0 -- No delay
-                   )
+                   -- Wait before next step
+                   task.wait(waitTime)
                    
-                   -- Create the tween
-                   local nextCFrame = CFrame.new(nextPosition)
-                   local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = nextCFrame})
-                   
-                   -- Set up callbacks
-                   tween.Completed:Connect(function()
-                       currentWaypoint = currentWaypoint + 1
-                       
-                       -- Small pause between waypoints to reduce detection
-                       task.wait(0.5)
-                       
-                       if teleportMarker.Parent then
-                           teleportToNextWaypoint()
-                       else
-                           cleanUp()
-                       end
-                   end)
-                   
-                   -- Start the tween
-                   humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-                   tween:Play()
-               end
-               
-               -- Start the waypoint teleportation
-               teleportToNextWaypoint()
-           else
-               -- For shorter distances, use a single tween with camera lock
-               
-               -- Make character uncontrollable during movement
-               humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-               
-               -- Enable noclip
-               noclipConnection = RunService.Stepped:Connect(function()
-                   for _, part in pairs(character:GetDescendants()) do
-                       if part:IsA("BasePart") then
-                           part.CanCollide = false
-                           -- Prevent falling
-                           part.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                           part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                       end
-                   end
-                   
-                   -- Keep camera fixed
-                   if camera.CameraType == Enum.CameraType.Scriptable then
-                       -- Keep camera in a fixed position
-                       camera.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 5, 10), rootPart.Position)
-                   end
-               end)
-               
-               -- Set camera to scriptable mode to prevent shaking
-               camera.CameraType = Enum.CameraType.Scriptable
-               
-               -- Very slow speed - approximately 15-20 studs per second
-               local travelTime = math.max(totalDistance / 15, 3)
-               
-               -- Create a smooth and slow tween
-               local tweenInfo = TweenInfo.new(
-                   travelTime,
-                   Enum.EasingStyle.Linear, -- Constant speed
-                   Enum.EasingDirection.Out,
-                   0, -- No repeat
-                   false, -- Don't reverse
-                   0 -- No delay
-               )
-               
-               -- Create the tween with fixed Y position to prevent bobbing
-               local targetY = targetPosition.Y
-               local targetCFrame = CFrame.new(targetPosition)
-               local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
-               
-               -- Create a safety timeout
-               local timeoutConnection
-               timeoutConnection = task.delay(travelTime + 5, function()
-                   if tween.PlaybackState ~= Enum.PlaybackState.Completed then
-                       tween:Cancel()
-                       rootPart.CFrame = targetCFrame
+                   -- Continue loop if still active
+                   if _G.SafeTeleportActive then
+                       task.spawn(teleportLoop)
+                   else
                        cleanUp()
                    end
-                   timeoutConnection = nil
-               end)
+               end
                
-               -- Connect to tween completion
-               tween.Completed:Connect(function()
-                   -- Clean up on complete
-                   if timeoutConnection then
-                       task.cancel(timeoutConnection)
-                       timeoutConnection = nil
+               -- Start the loop
+               task.spawn(teleportLoop)
+               
+               -- Safety timeout (30 seconds max)
+               task.delay(30, function()
+                   if _G.SafeTeleportActive then
+                       rootPart.CFrame = CFrame.new(targetPosition)
+                       cleanUp()
                    end
-                   
-                   cleanUp()
                end)
-               
-               -- Start the tween
-               tween:Play()
            end
+           
+           -- Start the teleport
+           safeIncrementalTeleport()
        else
            warn("Invalid teleport location selected: " .. selectedLocation)
        end
