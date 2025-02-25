@@ -1128,100 +1128,136 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Dropdown = TeleportTab:CreateDropdown({
-    Name = "Teleport Locations",
-    Options = {
-        "Construction Job",
-        "Warehouse",
-        "Ice Box",
-        "Land Lord",
-        "Pawn Shop",
-        "Car Dealership", 
-        "McDonalds Job"
-    },
-    CurrentOption = {}, -- Empty table means no initial selection
-    MultipleOptions = false,
-    Flag = "TeleportLocation",
-    Callback = function(Option)
-        -- Check if a location was selected
-        if #Option == 0 then
-            return -- No location selected, do nothing
-        end
-        
-        -- Get the selected location from the dropdown
-        local selectedLocation = Option[1]
-        
-        -- Define all teleport positions
-        local teleportLocations = {
-            ["Construction Job"] = Vector3.new(-1729, 370, -1171),
-            ["Warehouse"] = Vector3.new(-1563, 258, -1174),
-            ["Ice Box"] = Vector3.new(-202, 283, -1169),
-            ["Land Lord"] = Vector3.new(-209, 283, -1240),
-            ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
-            ["Car Dealership"] = Vector3.new(-374, 253, -1247),
-            ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
-        }
-        
-        -- Get the target position for teleportation
-        local targetPosition = teleportLocations[selectedLocation]
-        
-        -- Make sure the position exists
-        if targetPosition then
-            local player = game.Players.LocalPlayer
-            local character = player.Character or player.CharacterAdded:Wait()
-            local humanoid = character:WaitForChild("Humanoid")
-            local rootPart = character:WaitForChild("HumanoidRootPart")
-            
-            -- Use a consistent speed that won't trigger anti-cheat
-            local moveSpeed = 10 -- Reduced speed
-            
-            -- Add a random delay before starting
-            task.wait(math.random(1, 3))
-            
-            -- Enable NoClip
-            local function enableNoClip()
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = false
-                    end
-                end
-            end
-
-            local function disableNoClip()
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = true
-                    end
-                end
-            end
-
-            enableNoClip() -- Enable NoClip before movement
-            
-            -- Disable gravity for the root part
-            rootPart.Anchored = true
-            
-            -- Use TweenService for smooth movement
-            local tweenInfo = TweenInfo.new(
-                (targetPosition - rootPart.Position).Magnitude / moveSpeed, -- Time based on distance and speed
-                Enum.EasingStyle.Linear
-            )
-            
-            local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(targetPosition)})
-            tween:Play()
-            
-            tween.Completed:Connect(function()
-                -- Final position adjustment
-                rootPart.CFrame = CFrame.new(targetPosition) * CFrame.new(0, 5, 0) -- Slightly above the target position
-                task.wait(0.1) -- Short delay to stabilize
-                rootPart.CFrame = CFrame.new(targetPosition) -- Move to the exact position
-
-                -- Re-enable gravity and collisions
-                rootPart.Anchored = false
-                disableNoClip()
-            end)
-        else
-            warn("Invalid teleport location selected: " .. selectedLocation)
-        end
-    end,
+   Name = "Teleport Locations",
+   Options = {
+       "Construction Job",
+       "Warehouse",
+       "Ice Box",
+       "Land Lord",
+       "Pawn Shop",
+       "Car Dealership", 
+       "McDonalds Job"
+   },
+   CurrentOption = {}, -- Empty table means no initial selection
+   MultipleOptions = false,
+   Flag = "TeleportLocation",
+   Callback = function(Option)
+       -- Check if a location was selected
+       if #Option == 0 then
+           return -- No location selected, do nothing
+       end
+       
+       -- Get the selected location from the dropdown
+       local selectedLocation = Option[1]
+       
+       -- Define all teleport positions
+       local teleportLocations = {
+           ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+           ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+           ["Ice Box"] = Vector3.new(-202, 283, -1169),
+           ["Land Lord"] = Vector3.new(-209, 283, -1240),
+           ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+           ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+           ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+       }
+       
+       -- Get the target position for teleportation
+       local targetPosition = teleportLocations[selectedLocation]
+       
+       -- Make sure the position exists
+       if targetPosition then
+           local player = game.Players.LocalPlayer
+           local character = player.Character or player.CharacterAdded:Wait()
+           local humanoid = character:WaitForChild("Humanoid")
+           local rootPart = character:WaitForChild("HumanoidRootPart")
+           
+           -- Store original properties
+           local originalCanCollide = {}
+           for _, part in pairs(character:GetDescendants()) do
+               if part:IsA("BasePart") then
+                   originalCanCollide[part] = part.CanCollide
+               end
+           end
+           
+           -- Enable noclip
+           local noclipConnection = RunService.Stepped:Connect(function()
+               for _, part in pairs(character:GetDescendants()) do
+                   if part:IsA("BasePart") then
+                       part.CanCollide = false
+                   end
+               end
+           end)
+           
+           -- Function to clean up after teleport
+           local function cleanUp()
+               -- Disconnect noclip
+               if noclipConnection then
+                   noclipConnection:Disconnect()
+                   noclipConnection = nil
+               end
+               
+               -- Restore original collision settings
+               for part, canCollide in pairs(originalCanCollide) do
+                   if part and part:IsA("BasePart") and part:IsDescendantOf(game) then
+                       part.CanCollide = canCollide
+                   end
+               end
+               
+               -- Re-enable normal character controls
+               if humanoid and humanoid.Parent then
+                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+               end
+           end
+           
+           -- Make character uncontrollable during movement
+           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+           
+           -- Create tween info - adjust time based on distance
+           local distance = (targetPosition - rootPart.Position).Magnitude
+           local travelTime = math.clamp(distance / 45, 3, 20) -- Speed of 45 studs per second, minimum 3s, maximum 20s
+           
+           -- Create the tween
+           local tweenInfo = TweenInfo.new(
+               travelTime,
+               Enum.EasingStyle.Linear,
+               Enum.EasingDirection.Out,
+               0, -- No repeat
+               false, -- Don't reverse
+               0 -- No delay
+           )
+           
+           -- Create a CFrame tween for smoother movement
+           local targetCFrame = CFrame.new(targetPosition)
+           local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
+           
+           -- Create a safety timeout
+           local timeoutConnection
+           timeoutConnection = task.delay(travelTime + 5, function()
+               if tween.PlaybackState ~= Enum.PlaybackState.Completed then
+                   tween:Cancel()
+                   rootPart.CFrame = targetCFrame
+                   cleanUp()
+               end
+               timeoutConnection = nil
+           end)
+           
+           -- Connect to tween completion
+           tween.Completed:Connect(function()
+               -- Clean up on complete
+               if timeoutConnection then
+                   task.cancel(timeoutConnection)
+                   timeoutConnection = nil
+               end
+               
+               cleanUp()
+           end)
+           
+           -- Start the tween
+           tween:Play()
+       else
+           warn("Invalid teleport location selected: " .. selectedLocation)
+       end
+   end,
 })
 
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
