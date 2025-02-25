@@ -813,16 +813,16 @@ ESPManager:Start()
 })
 
 local Toggle = MainTab:CreateToggle({
-   Name = "Instant Aim Bot",
+   Name = "Universal View Aim Bot",
    CurrentValue = false,
    Flag = "Toggle1", 
    Callback = function(Value)
        if Value then
            -- Configuration
-           local ASSIST_RANGE = 200       -- Maximum range to detect targets
-           local HEAD_OFFSET = Vector3.new(0, 0.1, 0)  -- Fine-tune head targeting
-           local INSTANT_SNAP = true      -- Set to true for instant head snapping
-
+           local ASSIST_RANGE = 800       -- Increased range to detect targets
+           local HEAD_OFFSET_FIRSTPERSON = Vector3.new(0, 0.1, 0)  -- Head offset for first person
+           local HEAD_OFFSET_THIRDPERSON = Vector3.new(0, -0.2, 0)  -- Adjusted for third person view
+           
            local Players = game:GetService("Players")
            local RunService = game:GetService("RunService")
            local UserInputService = game:GetService("UserInputService")
@@ -855,100 +855,104 @@ local Toggle = MainTab:CreateToggle({
                    and humanoid.Health > 0
            end
            
-           -- Function to get nearest target
-           local function getNearestTarget()
-               local nearestDistance = ASSIST_RANGE
-               local nearestTarget = nil
+           -- Function to get the best target with enhanced priority
+           local function getBestTarget()
+               local targets = {}
                local playerChar = LocalPlayer.Character
                local playerHead = playerChar and playerChar:FindFirstChild("Head")
                
                if not playerHead then return nil end
                
-               -- Check players
-               for _, player in pairs(Players:GetPlayers()) do
-                   if player ~= LocalPlayer then
-                       local character = player.Character
-                       if isValidTarget(character, player) then
-                           local targetHead = character.Head
-                           local distance = (playerHead.Position - targetHead.Position).Magnitude
-                           
-                           if distance < nearestDistance then
-                               nearestDistance = distance
-                               nearestTarget = character
-                           end
+               -- Helper function to add target to list
+               local function processTarget(character, isPlayer, player)
+                   if not isValidTarget(character, player) then return end
+                   
+                   local targetHead = character:FindFirstChild("Head")
+                   if not targetHead then return end
+                   
+                   local distance = (playerHead.Position - targetHead.Position).Magnitude
+                   
+                   if distance < ASSIST_RANGE then
+                       -- Calculate aim angle (lower = higher priority)
+                       local lookVector = Camera.CFrame.LookVector
+                       local toTarget = (targetHead.Position - Camera.CFrame.Position).Unit
+                       local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
+                       
+                       -- Priority calculation: closer targets and targets in front get higher priority
+                       local priority = (ASSIST_RANGE - distance) + (math.pi - angle) * 100
+                       
+                       -- Extra priority for players vs NPCs
+                       if isPlayer then
+                           priority = priority * 1.2
                        end
+                       
+                       -- Extra priority for targets that are already close to your crosshair
+                       if angle < math.rad(10) then
+                           priority = priority * 2
+                       end
+                       
+                       table.insert(targets, {
+                           character = character,
+                           distance = distance,
+                           priority = priority,
+                           angle = angle
+                       })
                    end
                end
                
-               -- Check NPCs/monsters (checking multiple possible folder names)
+               -- Process players
+               for _, player in pairs(Players:GetPlayers()) do
+                   if player ~= LocalPlayer then
+                       local character = player.Character
+                       processTarget(character, true, player)
+                   end
+               end
+               
+               -- Process NPCs
                local possibleFolders = {"NPCs", "Monsters", "Enemies", "Mobs"}
                for _, folderName in pairs(possibleFolders) do
                    local folder = workspace:FindFirstChild(folderName)
                    if folder then
                        for _, npc in pairs(folder:GetChildren()) do
-                           if isValidTarget(npc) then
-                               local targetHead = npc.Head
-                               local distance = (playerHead.Position - targetHead.Position).Magnitude
-                               
-                               if distance < nearestDistance then
-                                   nearestDistance = distance
-                                   nearestTarget = npc
-                               end
-                           end
+                           processTarget(npc, false)
                        end
                    end
                end
                
-               return nearestTarget
+               -- Sort by priority
+               table.sort(targets, function(a, b)
+                   return a.priority > b.priority
+               end)
+               
+               return targets[1]
            end
            
-           -- Function to instantly snap to target's head
-           local function snapToTarget(target)
-               if not target then return end
+           -- Function to detect camera mode (first person vs third person)
+           local function isFirstPersonMode()
+               local character = LocalPlayer.Character
+               if not character or not character:FindFirstChild("Head") then return true end
                
-               local targetHead = target.Head
-               local aimPosition = targetHead.Position + HEAD_OFFSET
+               local headPos = character.Head.Position
+               local camPos = Camera.CFrame.Position
                
-               -- Instantly set camera to look at target
-               Camera.CFrame = CFrame.lookAt(
-                   Camera.CFrame.Position,
-                   aimPosition
-               )
+               -- If camera is close to head, it's likely first person
+               return (headPos - camPos).Magnitude < 2
            end
            
-           -- Function to update camera aim
-           local function updateAim()
-               local target = getNearestTarget()
-               if not target then return end
-               
-               local targetHead = target.Head
-               local aimPosition = targetHead.Position + HEAD_OFFSET
-               local playerChar = LocalPlayer.Character
-               
-               if playerChar and playerChar:FindFirstChild("Head") then
-                   if INSTANT_SNAP then
-                       -- Instant snap to target head
-                       Camera.CFrame = CFrame.lookAt(
-                           Camera.CFrame.Position,
-                           aimPosition
-                       )
-                   else
-                       -- Original smooth aiming (for reference)
-                       local aimAt = CFrame.lookAt(
-                           Camera.CFrame.Position,
-                           aimPosition
-                       )
-                       Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
-                   end
+           -- Function to get proper head targeting offset based on camera mode
+           local function getHeadOffset()
+               if isFirstPersonMode() then
+                   return HEAD_OFFSET_FIRSTPERSON
+               else
+                   return HEAD_OFFSET_THIRDPERSON
                end
            end
            
-           -- Check for equipped items
-           local function checkForEquippedWeapon()
+           -- Function to check for equipped weapon
+           local function hasWeaponEquipped()
                local character = LocalPlayer.Character
                if not character then return false end
                
-               -- Look for tool in character (equipped item)
                for _, item in pairs(character:GetChildren()) do
                    if item:IsA("Tool") then
                        return true
@@ -958,53 +962,94 @@ local Toggle = MainTab:CreateToggle({
                return false
            end
            
-           -- Enhanced update function that checks weapon status
-           local function enhancedUpdate()
-               local hasWeapon = checkForEquippedWeapon()
-               local target = getNearestTarget()
-               
-               if not target then return end
-               
-               if hasWeapon then
-                   -- Weapon equipped - instant snap
-                   snapToTarget(target)
-               else
-                   -- No weapon - use smooth tracking (optional)
-                   local targetHead = target.Head
-                   local aimPosition = targetHead.Position + HEAD_OFFSET
-                   
-                   local aimAt = CFrame.lookAt(
-                       Camera.CFrame.Position,
-                       aimPosition
-                   )
-                   Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
+           -- Function to get correct aim position based on target and view
+           local function getAimPosition(target)
+               if not target or not target.character or not target.character:FindFirstChild("Head") then
+                   return nil
                end
+               
+               local targetHead = target.character.Head
+               local offset = getHeadOffset()
+               
+               -- Apply different offsets based on distance
+               if target.distance > 100 then
+                   -- For distant targets, aim slightly higher to account for bullet drop
+                   offset = offset + Vector3.new(0, 0.1 + (target.distance / 1000), 0)
+               end
+               
+               -- Apply different offset for steep angles (looking up/down)
+               local lookVectorY = Camera.CFrame.LookVector.Y
+               if math.abs(lookVectorY) > 0.5 then
+                   -- Adjust vertical offset based on look angle
+                   offset = offset + Vector3.new(0, -lookVectorY * 0.2, 0)
+               end
+               
+               return targetHead.Position + offset
+           end
+           
+           -- Function to update aim with universal compatibility
+           local function updateAim()
+               local targetInfo = getBestTarget()
+               if not targetInfo then return end
+               
+               local aimPosition = getAimPosition(targetInfo)
+               if not aimPosition then return end
+               
+               -- Get different smoothing based on weapon and distance
+               local hasWeapon = hasWeaponEquipped()
+               local smoothing = 1 -- Default to instant snap
+               
+               if not hasWeapon then
+                   smoothing = 0.2 -- Slower when no weapon
+               elseif targetInfo.distance > 100 then
+                   smoothing = 0.8 -- Slightly smoother for distant targets
+               end
+               
+               -- Create aim CFrame
+               local aimCFrame = CFrame.lookAt(
+                   Camera.CFrame.Position,
+                   aimPosition
+               )
+               
+               -- Apply aim with appropriate smoothing
+               Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, smoothing)
            end
            
            -- Connect update function
-           _G.AimAssistConnection = RunService.RenderStepped:Connect(enhancedUpdate)
+           _G.UniversalAimConnection = RunService.RenderStepped:Connect(updateAim)
            
        else
            -- Cleanup when toggled off
-           if _G.AimAssistConnection then
-               _G.AimAssistConnection:Disconnect()
-               _G.AimAssistConnection = nil
+           if _G.UniversalAimConnection then
+               _G.UniversalAimConnection:Disconnect()
+               _G.UniversalAimConnection = nil
            end
        end
    end
 })
 
+-- Enhanced version with more features
 local Toggle = MainTab:CreateToggle({
-   Name = "Advanced Instant Aim Bot",
+   Name = "Advanced Universal Aim Bot",
    CurrentValue = false,
    Flag = "Toggle2", 
    Callback = function(Value)
        if Value then
            -- Configuration
-           local ASSIST_RANGE = 200       -- Maximum range to detect targets
-           local HEAD_OFFSET = Vector3.new(0, 0.1, 0)  -- Fine-tune head targeting
-           local INSTANT_SNAP = true      -- Set to true for instant head snapping
-           local WALL_CHECK = true        -- Set to true to ignore targets behind walls
+           local ASSIST_RANGE = 800       -- Maximum range to detect targets
+           local HEAD_OFFSET_FIRSTPERSON = Vector3.new(0, 0.1, 0)  -- Head offset for first person
+           local HEAD_OFFSET_THIRDPERSON = Vector3.new(0, -0.2, 0)  -- Adjusted for third person
+           local WALL_CHECK = true        -- Ignore targets behind walls
+           local REACTION_SPEED = 0.01    -- How quickly to react to new targets (lower = faster)
+           
+           -- Different aim points
+           local AIM_POINTS = {
+               HEAD = "Head",
+               TORSO = "HumanoidRootPart",
+               LEGS = "LeftLeg"
+           }
+           
+           local AIM_POINT = AIM_POINTS.HEAD  -- Default aim point
            
            local Players = game:GetService("Players")
            local RunService = game:GetService("RunService")
@@ -1020,151 +1065,91 @@ local Toggle = MainTab:CreateToggle({
                return player.Team == LocalPlayer.Team
            end
            
-           -- Function to check if target is visible (not behind wall)
-           local function isTargetVisible(targetPosition)
-               local playerChar = LocalPlayer.Character
-               if not playerChar or not playerChar:FindFirstChild("Head") then return false end
+           -- Function to check if target is visible
+           local function isTargetVisible(targetPart)
+               if not targetPart then return false end
                
-               local ray = Ray.new(playerChar.Head.Position, targetPosition - playerChar.Head.Position)
-               local hit, hitPosition = workspace:FindPartOnRayWithIgnoreList(
-                   ray,
-                   {LocalPlayer.Character, Camera, workspace:FindFirstChild("Ignore")},
-                   false,
-                   true
+               local character = LocalPlayer.Character
+               if not character or not character:FindFirstChild("Head") then return false end
+               
+               local ray = Ray.new(
+                   character.Head.Position, 
+                   targetPart.Position - character.Head.Position
                )
                
-               if hit then
-                   local distanceToHit = (hitPosition - playerChar.Head.Position).Magnitude
-                   local distanceToTarget = (targetPosition - playerChar.Head.Position).Magnitude
+               local ignoreList = {character, Camera}
+               -- Add any game-specific ignore parts
+               local ignoreFolder = workspace:FindFirstChild("Ignore")
+               if ignoreFolder then
+                   table.insert(ignoreList, ignoreFolder)
+               end
+               
+               local hit, hitPosition = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+               
+               if hit and (hit:IsDescendantOf(targetPart.Parent) or hit == targetPart) then
+                   return true
+               end
+               
+               return false
+           end
+           
+           -- Function to check if a character is valid target
+           local function isValidTarget(character, player)
+               if not character then return false end
+               
+               -- Check if character has necessary parts
+               local humanoid = character:FindFirstChild("Humanoid")
+               local head = character:FindFirstChild("Head")
+               local rootPart = character:FindFirstChild("HumanoidRootPart")
+               
+               -- If it's a player, check team status
+               if player then
+                   if isTeammate(player) then return false end
+               end
+               
+               -- Basic validity check
+               if not (humanoid and head and rootPart) then return false end
+               if humanoid.Health <= 0 then return false end
+               
+               -- Wall check if enabled
+               if WALL_CHECK then
+                   local targetPart = character:FindFirstChild(AIM_POINT)
+                   if not targetPart then targetPart = head end
                    
-                   -- If the hit distance is close to the target distance, the target is visible
-                   return math.abs(distanceToHit - distanceToTarget) < 5
+                   return isTargetVisible(targetPart)
                end
                
                return true
            end
            
-           -- Function to get best target with priority
-           local function getBestTarget()
-               local targets = {}
-               local playerChar = LocalPlayer.Character
-               local playerHead = playerChar and playerChar:FindFirstChild("Head")
+           -- Function to detect camera mode
+           local function isFirstPersonMode()
+               local character = LocalPlayer.Character
+               if not character or not character:FindFirstChild("Head") then return true end
                
-               if not playerHead then return nil end
+               local headPos = character.Head.Position
+               local camPos = Camera.CFrame.Position
                
-               -- Check players
-               for _, player in pairs(Players:GetPlayers()) do
-                   if player ~= LocalPlayer then
-                       local character = player.Character
-                       if isValidTarget(character, player) then
-                           local targetHead = character.Head
-                           local distance = (playerHead.Position - targetHead.Position).Magnitude
-                           
-                           -- Check visibility if wall check is enabled
-                           local visible = true
-                           if WALL_CHECK then
-                               visible = isTargetVisible(targetHead.Position)
-                           end
-                           
-                           if distance < ASSIST_RANGE and (visible or not WALL_CHECK) then
-                               -- Calculate target priority (lower distance = higher priority)
-                               local priority = (ASSIST_RANGE - distance)
-                               
-                               -- Bonus priority for visible targets
-                               if visible then
-                                   priority = priority * 1.5
-                               end
-                               
-                               -- Calculate aim angle (lower angle = higher priority)
-                               local lookVector = Camera.CFrame.LookVector
-                               local toTarget = (targetHead.Position - Camera.CFrame.Position).Unit
-                               local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
-                               
-                               -- Add angle-based priority (targets in front have higher priority)
-                               priority = priority + (math.pi - angle) * 20
-                               
-                               table.insert(targets, {
-                                   character = character,
-                                   distance = distance,
-                                   priority = priority
-                               })
-                           end
-                       end
-                   end
-               end
-               
-               -- Check NPCs using the same priority system
-               local possibleFolders = {"NPCs", "Monsters", "Enemies", "Mobs"}
-               for _, folderName in pairs(possibleFolders) do
-                   local folder = workspace:FindFirstChild(folderName)
-                   if folder then
-                       for _, npc in pairs(folder:GetChildren()) do
-                           if isValidTarget(npc) then
-                               local targetHead = npc.Head
-                               local distance = (playerHead.Position - targetHead.Position).Magnitude
-                               
-                               -- Check visibility if wall check is enabled
-                               local visible = true
-                               if WALL_CHECK then
-                                   visible = isTargetVisible(targetHead.Position)
-                               end
-                               
-                               if distance < ASSIST_RANGE and (visible or not WALL_CHECK) then
-                                   -- Calculate priority
-                                   local priority = (ASSIST_RANGE - distance)
-                                   
-                                   if visible then
-                                       priority = priority * 1.5
-                                   end
-                                   
-                                   -- Calculate aim angle
-                                   local lookVector = Camera.CFrame.LookVector
-                                   local toTarget = (targetHead.Position - Camera.CFrame.Position).Unit
-                                   local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
-                                   
-                                   priority = priority + (math.pi - angle) * 20
-                                   
-                                   table.insert(targets, {
-                                       character = npc,
-                                       distance = distance,
-                                       priority = priority
-                                   })
-                               end
-                           end
-                       end
-                   end
-               end
-               
-               -- Sort targets by priority and return the highest
-               table.sort(targets, function(a, b)
-                   return a.priority > b.priority
-               end)
-               
-               return targets[1] and targets[1].character or nil
+               return (headPos - camPos).Magnitude < 2
            end
            
-           -- Function to instantly snap to target's head
-           local function snapToTarget(target)
-               if not target then return end
-               
-               local targetHead = target.Head
-               local aimPosition = targetHead.Position + HEAD_OFFSET
-               
-               -- Instantly set camera to look at target
-               Camera.CFrame = CFrame.lookAt(
-                   Camera.CFrame.Position,
-                   aimPosition
-               )
+           -- Function to get head offset based on view mode
+           local function getTargetOffset()
+               if isFirstPersonMode() then
+                   return HEAD_OFFSET_FIRSTPERSON
+               else
+                   return HEAD_OFFSET_THIRDPERSON
+               end
            end
            
-           -- Function to check for equipped weapons
-           local function isWeaponEquipped()
+           -- Function to check for equipped weapon
+           local function hasWeaponEquipped()
                local character = LocalPlayer.Character
                if not character then return false end
                
-               -- Look for tool in character (equipped item)
                for _, item in pairs(character:GetChildren()) do
                    if item:IsA("Tool") then
+                       -- You can add weapon-specific detection here
                        return true
                    end
                end
@@ -1172,36 +1157,174 @@ local Toggle = MainTab:CreateToggle({
                return false
            end
            
-           -- Main update function
-           local function advancedUpdate()
-               local target = getBestTarget()
-               if not target then return end
+           -- Enhanced priority target selection
+           local function getBestTarget()
+               local targets = {}
+               local playerChar = LocalPlayer.Character
+               if not playerChar then return nil end
                
-               local hasWeapon = isWeaponEquipped()
+               local playerHead = playerChar:FindFirstChild("Head")
+               if not playerHead then return nil end
                
-               if hasWeapon and INSTANT_SNAP then
-                   -- Weapon equipped - instant head snapping
-                   snapToTarget(target)
-               else
-                   -- No weapon or smooth aiming is preferred
-                   local targetHead = target.Head
-                   local aimPosition = targetHead.Position + HEAD_OFFSET
-                   
-                   local aimAt = CFrame.lookAt(
-                       Camera.CFrame.Position,
-                       aimPosition
-                   )
-                   
-                   -- Use either instant snap or smooth tracking
-                   if INSTANT_SNAP then
-                       Camera.CFrame = aimAt
-                   else
-                       Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
+               -- Process all players
+               for _, player in pairs(Players:GetPlayers()) do
+                   if player ~= LocalPlayer then
+                       local character = player.Character
+                       if isValidTarget(character, player) then
+                           local targetPart = character:FindFirstChild(AIM_POINT)
+                           if not targetPart then targetPart = character:FindFirstChild("Head") end
+                           
+                           if targetPart then
+                               local distance = (playerHead.Position - targetPart.Position).Magnitude
+                               
+                               if distance <= ASSIST_RANGE then
+                                   -- Calculate angle priority
+                                   local lookVector = Camera.CFrame.LookVector
+                                   local toTarget = (targetPart.Position - Camera.CFrame.Position).Unit
+                                   local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
+                                   
+                                   -- Calculate priority: distance, angle, visibility
+                                   local priority = (ASSIST_RANGE - distance)
+                                   
+                                   -- Huge priority boost for targets already near crosshair
+                                   if angle < math.rad(5) then
+                                       priority = priority * 10
+                                   elseif angle < math.rad(20) then
+                                       priority = priority * 3
+                                   end
+                                   
+                                   -- Priority based on angle to target
+                                   priority = priority + (math.pi - angle) * 200
+                                   
+                                   -- Add health consideration - prefer lower health targets
+                                   local humanoid = character:FindFirstChild("Humanoid")
+                                   if humanoid then
+                                       priority = priority + (100 - humanoid.Health) * 2
+                                   end
+                                   
+                                   table.insert(targets, {
+                                       character = character,
+                                       targetPart = targetPart,
+                                       distance = distance,
+                                       priority = priority,
+                                       angle = angle,
+                                       health = humanoid and humanoid.Health or 100
+                                   })
+                               end
+                           end
+                       end
                    end
                end
+               
+               -- Handle NPCs
+               local possibleFolders = {"NPCs", "Monsters", "Enemies", "Mobs"}
+               for _, folderName in pairs(possibleFolders) do
+                   local folder = workspace:FindFirstChild(folderName)
+                   if folder then
+                       for _, npc in pairs(folder:GetChildren()) do
+                           if isValidTarget(npc) then
+                               local targetPart = npc:FindFirstChild(AIM_POINT)
+                               if not targetPart then targetPart = npc:FindFirstChild("Head") end
+                               
+                               if targetPart then
+                                   local distance = (playerHead.Position - targetPart.Position).Magnitude
+                                   
+                                   if distance <= ASSIST_RANGE then
+                                       -- Same priority calculation logic as players
+                                       local lookVector = Camera.CFrame.LookVector
+                                       local toTarget = (targetPart.Position - Camera.CFrame.Position).Unit
+                                       local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
+                                       
+                                       local priority = (ASSIST_RANGE - distance)
+                                       
+                                       if angle < math.rad(5) then
+                                           priority = priority * 10
+                                       elseif angle < math.rad(20) then
+                                           priority = priority * 3
+                                       end
+                                       
+                                       priority = priority + (math.pi - angle) * 200
+                                       
+                                       local humanoid = npc:FindFirstChild("Humanoid")
+                                       if humanoid then
+                                           priority = priority + (100 - humanoid.Health) * 2
+                                       end
+                                       
+                                       table.insert(targets, {
+                                           character = npc,
+                                           targetPart = targetPart,
+                                           distance = distance,
+                                           priority = priority,
+                                           angle = angle,
+                                           health = humanoid and humanoid.Health or 100
+                                       })
+                                   end
+                               end
+                           end
+                       end
+                   end
+               end
+               
+               -- Sort by priority and return the best target
+               table.sort(targets, function(a, b)
+                   return a.priority > b.priority
+               end)
+               
+               return targets[1]
            end
            
-           -- Connect update function
+           -- Calculate the ideal aim position
+           local function calculateAimPosition(targetInfo)
+               if not targetInfo or not targetInfo.targetPart then return nil end
+               
+               local offset = getTargetOffset()
+               
+               -- Apply distance-based adjustments
+               if targetInfo.distance > 100 then
+                   -- For distant targets, aim slightly higher to account for bullet drop
+                   offset = offset + Vector3.new(0, 0.1 + (targetInfo.distance / 1000), 0)
+               end
+               
+               -- Apply different offset for steep angles
+               local lookVectorY = Camera.CFrame.LookVector.Y
+               if math.abs(lookVectorY) > 0.5 then
+                   offset = offset + Vector3.new(0, -lookVectorY * 0.2, 0)
+               end
+               
+               return targetInfo.targetPart.Position + offset
+           end
+           
+           -- Main update function
+           local function advancedUpdate()
+               local targetInfo = getBestTarget()
+               if not targetInfo then return end
+               
+               local aimPosition = calculateAimPosition(targetInfo)
+               if not aimPosition then return end
+               
+               -- Determine proper smoothing/snap speed
+               local isWeaponEquipped = hasWeaponEquipped()
+               local smoothFactor
+               
+               if isWeaponEquipped then
+                   -- Instant snap when weapon is equipped
+                   smoothFactor = 1
+               else
+                   -- Smooth tracking otherwise
+                   smoothFactor = 0.3
+               end
+               
+               -- Adjust smoothness based on angle (more snap for targets already near crosshair)
+               if targetInfo.angle < math.rad(5) then
+                   smoothFactor = math.min(1, smoothFactor + 0.4)
+               end
+               
+               -- Create aim CFrame and apply with smoothing
+               local aimCFrame = CFrame.lookAt(Camera.CFrame.Position, aimPosition)
+               Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, smoothFactor)
+           end
+           
+           -- Connect update function to RenderStepped for smooth performance
            _G.AdvancedAimConnection = RunService.RenderStepped:Connect(advancedUpdate)
            
        else
@@ -1213,26 +1336,6 @@ local Toggle = MainTab:CreateToggle({
        end
    end
 })
-
--- Helper function for use in both toggles
-local function isValidTarget(character, player)
-    if not character then return false end
-    
-    -- Check if character has necessary parts
-    local humanoid = character:FindFirstChild("Humanoid")
-    local head = character:FindFirstChild("Head")
-    
-    -- If it's a player, check team status
-    if player then
-        local LocalPlayer = game:GetService("Players").LocalPlayer
-        if not LocalPlayer.Team then return true end
-        if player.Team == LocalPlayer.Team then return false end
-    end
-    
-    return humanoid 
-        and head 
-        and humanoid.Health > 0
-end
 
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
