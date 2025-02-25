@@ -1124,6 +1124,82 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
+local Dropdown = TeleportTab:CreateDropdown({
+   Name = "Teleport Locations",
+   Options = {
+       "Construction Job",
+       "Warehouse",
+       "Ice Box",
+       "Land Lord",
+       "Pawn Shop",
+       "Car Dealership", 
+       "McDonalds Job"
+   },
+   CurrentOption = {}, -- Empty table means no initial selection
+   MultipleOptions = false,
+   Flag = "TeleportLocation",
+   Callback = function(Option)
+       -- Check if a location was selected
+       if #Option == 0 then
+           return -- No location selected, do nothing
+       end
+       
+       -- Get the selected location from the dropdown
+       local selectedLocation = Option[1]
+       
+       -- Define all teleport positions
+       local teleportLocations = {
+           ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+           ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+           ["Ice Box"] = Vector3.new(-202, 283, -1169),
+           ["Land Lord"] = Vector3.new(-209, 283, -1240),
+           ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+           ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+           ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+       }
+       
+       -- Get the target position for teleportation
+       local targetPosition = teleportLocations[selectedLocation]
+       
+       -- Make sure the position exists
+       if targetPosition then
+           local player = game.Players.LocalPlayer
+           local character = player.Character or player.CharacterAdded:Wait()
+           local humanoid = character:WaitForChild("Humanoid")
+           local rootPart = character:WaitForChild("HumanoidRootPart")
+           
+           -- Get current properties
+           local currentWalkSpeed = humanoid.WalkSpeed
+           local currentPosition = rootPart.Position
+           
+           -- Calculate direction vector
+           local direction = (targetPosition - currentPosition).Unit
+           
+           -- Disable character control temporarily
+           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+           
+           -- Start flying towards the target
+           local flightConnection
+           flightConnection = game:GetService("RunService").Heartbeat:Connect(function()
+               local distanceToTarget = (targetPosition - rootPart.Position).Magnitude
+               
+               if distanceToTarget > 5 then
+                   -- Apply velocity in the direction of the target at the character's walk speed
+                   rootPart.Velocity = direction * currentWalkSpeed
+               else
+                   -- We've reached the destination
+                   flightConnection:Disconnect()
+                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                   rootPart.Velocity = Vector3.new(0, 0, 0)
+                   rootPart.CFrame = CFrame.new(targetPosition)
+               end
+           end)
+       else
+           warn("Invalid teleport location selected: " .. selectedLocation)
+       end
+   end,
+})
+
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
 local MiscSection = MiscTab:CreateSection("Misc")
 
