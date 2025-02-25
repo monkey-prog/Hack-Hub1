@@ -281,34 +281,45 @@ local function UpdateESP()
             
             -- Get accurate character size
             local CharSize = GetCharacterSize(Player.Character)
-            local ScaleFactor = 1 / (Distance * 0.05 + 1) -- Scale based on distance
             
-            if OnScreen then
-                -- World to screen calculation for the box corners
-                local TopY = ScreenPos.Y - (CharSize.Y * 0.55) * ScaleFactor
-                local BottomY = ScreenPos.Y + (CharSize.Y * 0.15) * ScaleFactor
-                local BoxHeight = BottomY - TopY
-                local BoxWidth = BoxHeight * 0.6 -- Maintain proportions
-                
-                -- ESP Box - tight around the character
-                Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
-                Data.Box.Position = Vector2.new(ScreenPos.X - BoxWidth/2, TopY)
-                Data.Box.Visible = true
+            -- FIXED: Changed scaling to make boxes visible even at long distances
+            local ScaleFactor = 1 / (Distance * 0.02 + 1) -- Reduced distance effect
+            
+            -- Always show ESP for all players regardless of distance
+            -- Update text, line, and box for the player
+            
+            -- ESP Box - tight around the character
+            local TopY = ScreenPos.Y - (CharSize.Y * 0.55) * ScaleFactor
+            local BottomY = ScreenPos.Y + (CharSize.Y * 0.15) * ScaleFactor
+            local BoxHeight = BottomY - TopY
+            local BoxWidth = BoxHeight * 0.6 -- Maintain proportions
+            
+            -- Make minimum box size to ensure visibility
+            BoxWidth = math.max(BoxWidth, 10) 
+            BoxHeight = math.max(BoxHeight, 20)
+            
+            Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
+            Data.Box.Position = Vector2.new(ScreenPos.X - BoxWidth/2, TopY)
+            
+            -- FIXED: Show all ESP elements even when player is off screen
+            -- This makes boxes, lines, and text visible even for distant players
+            Data.Box.Visible = true
+            
+            -- FIXED: Make sure line color matches team color
+            local teamName = Player.Team and Player.Team.Name or "Neutral"
+            local correctLineColor = TeamColors[teamName] or Color3.fromRGB(255, 255, 255)
+            Data.Line.Color = correctLineColor
+            Data.RadarDot.Color = correctLineColor
 
-                -- ESP Line
-                Data.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                Data.Line.To = Vector2.new(ScreenPos.X, ScreenPos.Y)
-                Data.Line.Visible = true
+            -- ESP Line
+            Data.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            Data.Line.To = Vector2.new(ScreenPos.X, ScreenPos.Y)
+            Data.Line.Visible = true
 
-                -- ESP Text
-                Data.Text.Text = string.format("%d M | %s | %d HP", Distance, Player.DisplayName, math.floor(Humanoid.Health))
-                Data.Text.Position = Vector2.new(ScreenPos.X, TopY - 15)
-                Data.Text.Visible = true
-            else
-                Data.Box.Visible = false
-                Data.Line.Visible = false
-                Data.Text.Visible = false
-            end
+            -- ESP Text
+            Data.Text.Text = string.format("%d M | %s | %d HP", Distance, Player.DisplayName, math.floor(Humanoid.Health))
+            Data.Text.Position = Vector2.new(ScreenPos.X, TopY - 15)
+            Data.Text.Visible = true
 
             -- Radar Logic
             local LocalHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
