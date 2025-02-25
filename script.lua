@@ -380,353 +380,206 @@ Players.PlayerRemoving:Connect(RemoveESP)
 -- Update loop
 RunService.RenderStepped:Connect(UpdateESP)
 
--- Fully Automatic Aimbot System
+-- Simplified Aimbot & Silent Aim System
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Aimbot Configuration
-local AimbotSettings = {
-    Enabled = false,            -- Toggle state
-    TargetPart = "Head",        -- Body part to target (default)
-    TeamCheck = true,           -- Skip teammates
-    VisibilityCheck = true,     -- Check if target is visible
-    MaxDistance = 200,          -- Maximum targeting distance (in studs)
-    PriorityDistance = 100,     -- Distance to prioritize visible targets
-    WallTargetDistance = 50,    -- Distance to still target players behind walls
-    AlwaysActive = true,        -- No need to press aim key
-    InstantTrack = true,        -- Instant tracking (no smoothing)
-    FOVRadius = 500,            -- Increased FOV circle size for better acquisition
-    ShowFOV = true,             -- Show FOV circle
-    IgnorePlayers = {},         -- List of players to ignore
-    TargetPriority = "Closest"  -- Target priority method: "Closest", "LowestHealth", "HighestThreat"
+-- Core Settings
+local Settings = {
+    -- Aimbot
+    AimbotEnabled = false,
+    -- Silent Aim
+    SilentAimEnabled = false,
+    -- Shared Settings
+    TeamCheck = true,
+    TargetPart = "Head",
+    TargetPriority = "Closest" -- "Closest", "LowestHealth", "Random"
 }
-
--- Drawing objects
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.Color = Color3.fromRGB(255, 255, 255)
-FOVCircle.Filled = false
-FOVCircle.Transparency = 0.7
-FOVCircle.NumSides = 64
-FOVCircle.Radius = AimbotSettings.FOVRadius
-FOVCircle.Visible = false
 
 -- Variables
 local CurrentTarget = nil
-local LastTargetTime = 0
-local TargetAcquired = false
-local TargetLockDuration = 1.5 -- Duration to lock onto a target (in seconds)
 
--- Function to check if a point is visible
-local function IsVisible(Position, Target)
-    if not AimbotSettings.VisibilityCheck then return true end
-    
-    local Origin = Camera.CFrame.Position
-    local Direction = (Position - Origin).Unit * AimbotSettings.MaxDistance
-    
-    local RaycastParams = RaycastParams.new()
-    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    RaycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Target}
-    
-    local Result = workspace:Raycast(Origin, Direction, RaycastParams)
-    return Result == nil
+-- Function to check if a player is on the same team
+local function IsTeammate(Player)
+    if Settings.TeamCheck then
+        return Player.Team == LocalPlayer.Team
+    end
+    return false
 end
 
--- Function to find all valid targets
+-- Function to get all valid targets
 local function GetValidTargets()
     local ValidTargets = {}
     
     for _, Player in pairs(Players:GetPlayers()) do
         if Player == LocalPlayer then continue end
-        if table.find(AimbotSettings.IgnorePlayers, Player.Name) then continue end
         
         -- Team check
-        if AimbotSettings.TeamCheck and Player.Team == LocalPlayer.Team then continue end
+        if IsTeammate(Player) then continue end
         
         -- Character checks
         if not Player.Character or not Player.Character:FindFirstChild("Humanoid") then continue end
         if Player.Character.Humanoid.Health <= 0 then continue end
         
         -- Target part check
-        local TargetPart = Player.Character:FindFirstChild(AimbotSettings.TargetPart)
+        local TargetPart = Player.Character:FindFirstChild(Settings.TargetPart)
         if not TargetPart then 
             -- Fallback to HumanoidRootPart if the target part doesn't exist
             TargetPart = Player.Character:FindFirstChild("HumanoidRootPart")
             if not TargetPart then continue end
         end
         
-        -- Distance check
+        -- Distance calculation
         local Distance = (TargetPart.Position - Camera.CFrame.Position).Magnitude
-        if Distance > AimbotSettings.MaxDistance then continue end
         
-        -- Visibility check
-        local IsTargetVisible = IsVisible(TargetPart.Position, Player.Character)
-        
-        -- Prioritize visible targets within priority distance
-        if IsTargetVisible or Distance <= AimbotSettings.WallTargetDistance then
-            -- Calculate threat level (customizable)
-            local ThreatLevel = 0
-            
-            -- Basic threat calculation based on distance and visibility
-            if IsTargetVisible then
-                ThreatLevel = ThreatLevel + 10
-            end
-            
-            if Distance <= 25 then
-                ThreatLevel = ThreatLevel + 20
-            elseif Distance <= 50 then
-                ThreatLevel = ThreatLevel + 10
-            elseif Distance <= 100 then
-                ThreatLevel = ThreatLevel + 5
-            end
-            
-            -- Add to valid targets
-            table.insert(ValidTargets, {
-                Player = Player,
-                Distance = Distance,
-                Health = Player.Character.Humanoid.Health,
-                TargetPart = TargetPart,
-                Visible = IsTargetVisible,
-                ThreatLevel = ThreatLevel
-            })
-        end
+        -- Add to valid targets
+        table.insert(ValidTargets, {
+            Player = Player,
+            Distance = Distance,
+            Health = Player.Character.Humanoid.Health,
+            TargetPart = TargetPart
+        })
     end
     
     return ValidTargets
 end
 
--- Function to get best target based on priority method
+-- Function to get the best target based on priority
 local function GetBestTarget()
     local ValidTargets = GetValidTargets()
     if #ValidTargets == 0 then return nil end
     
     -- Sort targets based on priority method
-    if AimbotSettings.TargetPriority == "Closest" then
+    if Settings.TargetPriority == "Closest" then
         table.sort(ValidTargets, function(a, b)
-            -- Prioritize close and visible targets
-            if a.Visible and not b.Visible then
-                return true
-            elseif not a.Visible and b.Visible then
-                return false
-            else
-                return a.Distance < b.Distance
-            end
+            return a.Distance < b.Distance
         end)
-    elseif AimbotSettings.TargetPriority == "LowestHealth" then
+    elseif Settings.TargetPriority == "LowestHealth" then
         table.sort(ValidTargets, function(a, b)
             return a.Health < b.Health
         end)
-    elseif AimbotSettings.TargetPriority == "HighestThreat" then
-        table.sort(ValidTargets, function(a, b)
-            return a.ThreatLevel > b.ThreatLevel
-        end)
+    elseif Settings.TargetPriority == "Random" then
+        return ValidTargets[math.random(1, #ValidTargets)]
     end
     
-    -- Maintain target lock for a period to prevent rapid switching
-    if CurrentTarget and time() - LastTargetTime < TargetLockDuration then
-        -- Check if current target is still valid
-        for _, Target in ipairs(ValidTargets) do
-            if Target.Player == CurrentTarget then
-                return CurrentTarget
+    return ValidTargets[1]
+end
+
+-- Function to aim at target (for aimbot)
+local function AimAtTarget(Target)
+    if not Target or not Target.TargetPart then return end
+    
+    local TargetPosition = Target.TargetPart.Position
+    local TargetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPosition)
+    
+    -- Set camera to target
+    Camera.CFrame = TargetCFrame
+end
+
+-- Silent aim hook (will hook into the game's shooting mechanics)
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
+    local Args = {...}
+    local Method = getnamecallmethod()
+    
+    -- Only activate if silent aim is enabled
+    if Settings.SilentAimEnabled and (Method == "FireServer" or Method == "InvokeServer") and checkcaller() == false then
+        -- Only modify if this is a shooting-related remote
+        local RemoteName = tostring(Self)
+        if RemoteName:lower():find("shoot") or RemoteName:lower():find("fire") or RemoteName:lower():find("hit") then
+            local Target = GetBestTarget()
+            if Target and Target.TargetPart then
+                -- Modify the arguments to redirect to the target
+                -- This is generic and will need adjusting for specific games
+                for i, v in pairs(Args) do
+                    if typeof(v) == "Vector3" then
+                        Args[i] = Target.TargetPart.Position
+                    elseif typeof(v) == "CFrame" then
+                        Args[i] = CFrame.new(v.Position, Target.TargetPart.Position)
+                    elseif typeof(v) == "Instance" and v:IsA("BasePart") then
+                        Args[i] = Target.TargetPart
+                    end
+                end
             end
         end
     end
     
-    -- Return the best target
-    LastTargetTime = time()
-    return ValidTargets[1].Player
-end
+    return OldNamecall(Self, unpack(Args))
+end)
 
--- Function to aim at a target
-local function AimAt(Target)
-    if not Target or not Target.Character then return end
-    
-    local TargetPart = Target.Character:FindFirstChild(AimbotSettings.TargetPart)
-    if not TargetPart then
-        -- Fallback to HumanoidRootPart if the target part doesn't exist
-        TargetPart = Target.Character:FindFirstChild("HumanoidRootPart")
-        if not TargetPart then return end
-    end
-    
-    local TargetPosition = TargetPart.Position
-    
-    -- Add prediction for moving targets
-    if Target.Character:FindFirstChild("HumanoidRootPart") then
-        local Velocity = Target.Character.HumanoidRootPart.Velocity
-        TargetPosition = TargetPosition + (Velocity * 0.05) -- Basic prediction factor
-    end
-    
-    -- Calculate the direction
-    local TargetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPosition)
-    
-    -- Instant tracking mode
-    if AimbotSettings.InstantTrack then
-        Camera.CFrame = TargetCFrame
-    else
-        -- Fallback to smooth tracking if instant is disabled
-        local LerpFactor = 0.5 -- Smoothness factor
-        Camera.CFrame = Camera.CFrame:Lerp(TargetCFrame, LerpFactor)
-    end
-    
-    TargetAcquired = true
-end
-
--- Toggle the aimbot
-local function ToggleAimbot(Value)
-    AimbotSettings.Enabled = Value
-    
-    -- Update FOV circle
-    FOVCircle.Visible = Value and AimbotSettings.ShowFOV
-    
-    -- Reset target when disabling
-    if not Value then
-        CurrentTarget = nil
-        TargetAcquired = false
-    end
-    
-    -- Notification
-    Rayfield:Notify({
-        Title = "Aimbot " .. (Value and "Enabled" or "Disabled"),
-        Content = "Aimbot is now " .. (Value and "ON" or "OFF"),
-        Duration = 3,
-        Image = nil,
-    })
-end
-
--- Main aimbot logic - runs every frame
+-- Main aimbot loop
 RunService.RenderStepped:Connect(function()
-    -- Update FOV circle
-    if AimbotSettings.ShowFOV and AimbotSettings.Enabled then
-        FOVCircle.Position = UserInputService:GetMouseLocation()
-        FOVCircle.Radius = AimbotSettings.FOVRadius
-        FOVCircle.Visible = true
-    else
-        FOVCircle.Visible = false
-    end
-    
-    -- Handle aimbot logic
-    if AimbotSettings.Enabled and AimbotSettings.AlwaysActive then
-        -- Get best target
+    if Settings.AimbotEnabled then
         local Target = GetBestTarget()
-        
-        -- Update current target
         if Target then
-            CurrentTarget = Target
-            AimAt(CurrentTarget)
-        else
-            TargetAcquired = false
+            AimAtTarget(Target)
         end
     end
 end)
 
--- Create the aimbot toggle in the MainTab
-local AimbotToggle = MainTab:CreateToggle({
-    Name = "Toggle Aimbot",
+-- UI Creation - Basic implementation for the features you requested
+local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Simplified Aimbot",
+   LoadingTitle = "Loading...",
+   LoadingSubtitle = "by Claude",
+})
+
+local MainTab = Window:CreateTab("Main", nil)
+
+-- Aimbot Toggle
+MainTab:CreateToggle({
+    Name = "Aimbot Toggle",
     CurrentValue = false,
-    Flag = "ToggleAimbot", 
+    Flag = "AimbotToggle", 
     Callback = function(Value)
-        ToggleAimbot(Value)
+        Settings.AimbotEnabled = Value
     end,
 })
 
--- Add always active toggle
-local AlwaysActiveToggle = MainTab:CreateToggle({
-    Name = "Always Active (No Key Required)",
+-- Silent Aim Toggle
+MainTab:CreateToggle({
+    Name = "Silent Aim Toggle",
+    CurrentValue = false,
+    Flag = "SilentAimToggle", 
+    Callback = function(Value)
+        Settings.SilentAimEnabled = Value
+    end,
+})
+
+-- Team Check Toggle
+MainTab:CreateToggle({
+    Name = "Team Check",
     CurrentValue = true,
-    Flag = "AlwaysActive",
+    Flag = "TeamCheck",
     Callback = function(Value)
-        AimbotSettings.AlwaysActive = Value
+        Settings.TeamCheck = Value
     end,
 })
 
--- Add instant tracking toggle
-local InstantTrackToggle = MainTab:CreateToggle({
-    Name = "Instant Tracking",
-    CurrentValue = true,
-    Flag = "InstantTracking",
-    Callback = function(Value)
-        AimbotSettings.InstantTrack = Value
-    end,
-})
-
--- Target priority dropdown
-local PriorityDropdown = MainTab:CreateDropdown({
+-- Target Priority Dropdown
+MainTab:CreateDropdown({
     Name = "Target Priority",
-    Options = {"Closest", "LowestHealth", "HighestThreat"},
+    Options = {"Closest", "LowestHealth", "Random"},
     CurrentOption = "Closest",
     Flag = "TargetPriority",
     Callback = function(Option)
-        AimbotSettings.TargetPriority = Option
+        Settings.TargetPriority = Option
     end,
 })
 
--- Target part dropdown
-local TargetPartDropdown = MainTab:CreateDropdown({
+-- Target Part Dropdown
+MainTab:CreateDropdown({
     Name = "Target Part",
     Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
     CurrentOption = "Head",
     Flag = "TargetPart",
     Callback = function(Option)
-        AimbotSettings.TargetPart = Option
-    end,
-})
-
--- Add maximum distance slider
-local MaxDistanceSlider = MainTab:CreateSlider({
-    Name = "Maximum Distance",
-    Range = {50, 500},
-    Increment = 10,
-    Suffix = "m",
-    CurrentValue = 200,
-    Flag = "MaxDistance",
-    Callback = function(Value)
-        AimbotSettings.MaxDistance = Value
-    end,
-})
-
--- FOV radius slider
-local FOVRadiusSlider = MainTab:CreateSlider({
-    Name = "FOV Radius",
-    Range = {100, 1000},
-    Increment = 50,
-    Suffix = "px",
-    CurrentValue = 500,
-    Flag = "FOVRadius",
-    Callback = function(Value)
-        AimbotSettings.FOVRadius = Value
-    end,
-})
-
--- Team check toggle
-local TeamCheckToggle = MainTab:CreateToggle({
-    Name = "Team Check",
-    CurrentValue = true,
-    Flag = "TeamCheck",
-    Callback = function(Value)
-        AimbotSettings.TeamCheck = Value
-    end,
-})
-
--- Show FOV circle toggle
-local ShowFOVToggle = MainTab:CreateToggle({
-    Name = "Show FOV Circle",
-    CurrentValue = true,
-    Flag = "ShowFOV",
-    Callback = function(Value)
-        AimbotSettings.ShowFOV = Value
-    end,
-})
-
--- Visibility check toggle
-local VisibilityCheckToggle = MainTab:CreateToggle({
-    Name = "Visibility Check",
-    CurrentValue = true,
-    Flag = "VisibilityCheck",
-    Callback = function(Value)
-        AimbotSettings.VisibilityCheck = Value
+        Settings.TargetPart = Option
     end,
 })
 
