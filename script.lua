@@ -1172,17 +1172,32 @@ local Dropdown = TeleportTab:CreateDropdown({
             local rootPart = character:WaitForChild("HumanoidRootPart")
             
             -- Use a consistent speed that won't trigger anti-cheat
-            local moveSpeed = 15 -- Reduced speed
+            local moveSpeed = 10 -- Reduced speed
             
             -- Add a random delay before starting
             task.wait(math.random(1, 3))
             
             -- Enable NoClip
-            for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
+            local function enableNoClip()
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
                 end
             end
+
+            local function disableNoClip()
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = true
+                    end
+                end
+            end
+
+            enableNoClip() -- Enable NoClip before movement
+            
+            -- Disable gravity for the root part
+            rootPart.Anchored = true
             
             -- Use TweenService for smooth movement
             local tweenInfo = TweenInfo.new(
@@ -1194,20 +1209,14 @@ local Dropdown = TeleportTab:CreateDropdown({
             tween:Play()
             
             tween.Completed:Connect(function()
-                -- Disable NoClip after reaching the destination
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = true
-                    end
-                end
-
                 -- Final position adjustment
                 rootPart.CFrame = CFrame.new(targetPosition) * CFrame.new(0, 5, 0) -- Slightly above the target position
                 task.wait(0.1) -- Short delay to stabilize
                 rootPart.CFrame = CFrame.new(targetPosition) -- Move to the exact position
 
-                -- Reset humanoid state
-                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                -- Re-enable gravity and collisions
+                rootPart.Anchored = false
+                disableNoClip()
             end)
         else
             warn("Invalid teleport location selected: " .. selectedLocation)
