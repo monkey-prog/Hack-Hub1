@@ -373,3 +373,483 @@ Players.PlayerRemoving:Connect(RemoveESP)
 
 -- Update loop
 RunService.RenderStepped:Connect(UpdateESP)
+
+local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
+local TeleportSection = TeleportTab:CreateSection("Teleport")
+
+local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
+local MiscSection = MiscTab:CreateSection("Misc")
+
+local Button = MiscTab:CreateButton({
+    Name = "Rejoin",
+    Callback = function()
+        -- Create notification before rejoining
+        Rayfield:Notify({
+            Title = "Rejoining Server",
+            Content = "Please wait 3 seconds while we reconnect you...",
+            Duration = 3,
+            Image = nil,
+        })
+        
+        -- Wait for 1 second to allow notification to be seen
+        task.wait(1)
+        
+        -- Get the TeleportService
+        local TeleportService = game:GetService("TeleportService")
+        local player = game:GetService("Players").LocalPlayer
+        
+        -- Rejoin the same server
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    end,
+})
+
+-- Regular Server Hop Button
+local ServerHopButton = MiscTab:CreateButton({
+    Name = "Server Hop",
+    Callback = function()
+        Rayfield:Notify({
+            Title = "Server Hop",
+            Content = "Finding a random server...",
+            Duration = 3,
+            Image = nil,
+        })
+        
+        local TeleportService = game:GetService("TeleportService")
+        local HttpService = game:GetService("HttpService")
+        local player = game:GetService("Players").LocalPlayer
+        
+        local function GetRandomServer()
+            local servers = {}
+            local endpoint = string.format(
+                "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Desc&limit=100",
+                game.PlaceId
+            )
+            
+            local success, result = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(endpoint))
+            end)
+            
+            if success and result and result.data then
+                for _, server in ipairs(result.data) do
+                    if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                        table.insert(servers, server)
+                    end
+                end
+            end
+            
+            return #servers > 0 and servers[math.random(1, #servers)] or nil
+        end
+        
+        local randomServer = GetRandomServer()
+        
+        if randomServer then
+            Rayfield:Notify({
+                Title = "Server Found",
+                Content = string.format("Joining server with %d players...", randomServer.playing),
+                Duration = 3,
+                Image = nil,
+            })
+            
+            task.wait(1)
+            
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServer.id, player)
+            end)
+        else
+            Rayfield:Notify({
+                Title = "Server Hop Failed",
+                Content = "No available servers found. Try again later.",
+                Duration = 3,
+                Image = nil,
+            })
+        end
+    end,
+})
+
+-- Low Player Server Button
+local LowPlayerServerButton = MiscTab:CreateButton({
+    Name = "Join Low Player Server",
+    Callback = function()
+        Rayfield:Notify({
+            Title = "Finding Server",
+            Content = "Searching for a low population server...",
+            Duration = 3,
+            Image = nil,
+        })
+        
+        local TeleportService = game:GetService("TeleportService")
+        local HttpService = game:GetService("HttpService")
+        local player = game:GetService("Players").LocalPlayer
+        
+        local function GetLowPopulationServer()
+            local servers = {}
+            local endpoint = string.format(
+                "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100",
+                game.PlaceId
+            )
+            
+            local success, result = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(endpoint))
+            end)
+            
+            if success and result and result.data then
+                for _, server in ipairs(result.data) do
+                    -- Look for servers with less than 5 players
+                    if server.playing < 5 and server.id ~= game.JobId then
+                        table.insert(servers, server)
+                    end
+                end
+                
+                -- Sort by player count (ascending)
+                table.sort(servers, function(a, b)
+                    return a.playing < b.playing
+                end)
+            end
+            
+            return #servers > 0 and servers[1] or nil
+        end
+        
+        local lowServer = GetLowPopulationServer()
+        
+        if lowServer then
+            Rayfield:Notify({
+                Title = "Low Player Server Found",
+                Content = string.format("Joining server with only %d players...", lowServer.playing),
+                Duration = 3,
+                Image = nil,
+            })
+            
+            task.wait(1)
+            
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, lowServer.id, player)
+            end)
+        else
+            Rayfield:Notify({
+                Title = "Server Search Failed",
+                Content = "No low population servers found. Try again later.",
+                Duration = 3,
+                Image = nil,
+            })
+        end
+    end,
+})
+
+local JobIdInput = MiscTab:CreateInput({
+    Name = "Server JobId",
+    CurrentValue = "",
+    PlaceholderText = "Format: PlaceId:JobId",
+    RemoveTextAfterFocusLost = false,
+    Flag = "JobIdTeleport",
+    Callback = function(Input)
+        if Input == "" then return end
+        
+        local TeleportService = game:GetService("TeleportService")
+        local Players = game:GetService("Players")
+        
+        -- Split the input into PlaceId and JobId using : as separator
+        local placeId, jobId = Input:match("(%d+):(.+)")
+        
+        -- If no : found, check for just numbers (PlaceId) or assume it's a JobId for current game
+        if not placeId then
+            if Input:match("^%d+$") then
+                -- If input is all numbers, treat as PlaceId
+                placeId = Input
+                jobId = nil
+            else
+                -- If input contains non-numbers, treat as JobId for current game
+                placeId = game.PlaceId
+                jobId = Input
+            end
+        end
+        
+        -- Convert PlaceId to number
+        placeId = tonumber(placeId)
+        
+        if not placeId then
+            Rayfield:Notify({
+                Title = "Invalid Input",
+                Content = "Invalid PlaceId format",
+                Duration = 3,
+                Image = nil,
+            })
+            return
+        end
+        
+        Rayfield:Notify({
+            Title = "Teleporting",
+            Content = jobId and "Joining specific server..." or "Joining game...",
+            Duration = 3,
+            Image = nil,
+        })
+        
+        -- Set up teleport error handling
+        local teleportOptions = Instance.new("TeleportOptions")
+        teleportOptions.ServerInstanceId = jobId
+        
+        -- Set up retry logic for teleport failures
+        local function attemptTeleport(retryCount)
+            retryCount = retryCount or 0
+            
+            if retryCount >= 3 then
+                Rayfield:Notify({
+                    Title = "Error",
+                    Content = "Failed to teleport after multiple attempts. Server might be unavailable.",
+                    Duration = 5,
+                    Image = nil,
+                })
+                return
+            end
+            
+            local success, error = pcall(function()
+                if jobId then
+                    TeleportService:TeleportToPlaceInstance(placeId, jobId, Players.LocalPlayer, nil, teleportOptions)
+                else
+                    TeleportService:Teleport(placeId, Players.LocalPlayer, teleportOptions)
+                end
+            end)
+            
+            if not success then
+                print("Teleport Error (Attempt " .. retryCount + 1 .. "):", error)
+                
+                -- Check for specific error messages
+                if typeof(error) == "string" then
+                    if error:find("experience is closed") or error:find("server is full") or error:find("reserved server") then
+                        Rayfield:Notify({
+                            Title = "Teleport Failed",
+                            Content = "Server is either full, closed, or unavailable. " .. error,
+                            Duration = 5,
+                            Image = nil,
+                        })
+                    else
+                        -- For other errors, retry after a short delay
+                        Rayfield:Notify({
+                            Title = "Retrying...",
+                            Content = "Attempt " .. retryCount + 2 .. " in 2 seconds",
+                            Duration = 2,
+                            Image = nil,
+                        })
+                        task.delay(2, function()
+                            attemptTeleport(retryCount + 1)
+                        end)
+                    end
+                end
+            end
+        end
+        
+        -- Connect to teleport failure event
+        local connection
+        connection = TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+            if player == Players.LocalPlayer then
+                connection:Disconnect()
+                
+                print("Teleport failed:", teleportResult.Name, errorMessage)
+                
+                if teleportResult == Enum.TeleportResult.GameEnded or 
+                   teleportResult == Enum.TeleportResult.GameFull or
+                   teleportResult == Enum.TeleportResult.Unauthorized then
+                    Rayfield:Notify({
+                        Title = "Teleport Failed",
+                        Content = "Reason: " .. teleportResult.Name .. " - " .. (errorMessage or ""),
+                        Duration = 5,
+                        Image = nil,
+                    })
+                else
+                    -- Try again for other teleport failures
+                    Rayfield:Notify({
+                        Title = "Retrying teleport",
+                        Content = "First attempt failed: " .. teleportResult.Name,
+                        Duration = 2,
+                        Image = nil,
+                    })
+                    task.delay(2, function() 
+                        attemptTeleport(1)
+                    end)
+                end
+            end
+        end)
+        
+        -- Start first teleport attempt
+        task.delay(1, function()
+            attemptTeleport(0)
+        end)
+    end,
+})
+
+local LinkInput = MiscTab:CreateInput({
+    Name = "Game/Private Server Link",
+    CurrentValue = "",
+    PlaceholderText = "Paste game or private server link here",
+    RemoveTextAfterFocusLost = false,
+    Flag = "LinkTeleport",
+    Callback = function(Link)
+        if Link == "" then return end
+        
+        local TeleportService = game:GetService("TeleportService")
+        local Players = game:GetService("Players")
+        
+        -- Extract PlaceId and optional PrivateServerId from the link
+        local placeId = Link:match("roblox.com/games/(%d+)")
+        local privateServerId = Link:match("privateServerLinkCode=([%w%-]+)")
+        
+        if not placeId then
+            Rayfield:Notify({
+                Title = "Invalid Link",
+                Content = "Please provide a valid Roblox game link",
+                Duration = 3,
+                Image = nil,
+            })
+            return
+        end
+        
+        placeId = tonumber(placeId)
+        
+        Rayfield:Notify({
+            Title = "Teleporting",
+            Content = "Joining game in 2 seconds...",
+            Duration = 2,
+            Image = nil,
+        })
+        
+        -- Set up teleport error handling
+        local teleportOptions = Instance.new("TeleportOptions")
+        
+        -- Set up retry logic for teleport failures
+        local function attemptTeleport(retryCount)
+            retryCount = retryCount or 0
+            
+            if retryCount >= 3 then
+                Rayfield:Notify({
+                    Title = "Error",
+                    Content = "Failed to teleport after multiple attempts. Server might be unavailable.",
+                    Duration = 5,
+                    Image = nil,
+                })
+                return
+            end
+            
+            local success, error = pcall(function()
+                if privateServerId then
+                    TeleportService:TeleportToPrivateServer(placeId, privateServerId, {Players.LocalPlayer})
+                else
+                    TeleportService:Teleport(placeId, Players.LocalPlayer, teleportOptions)
+                end
+            end)
+            
+            if not success then
+                print("Teleport Error (Attempt " .. retryCount + 1 .. "):", error)
+                
+                -- Check for specific error messages
+                if typeof(error) == "string" then
+                    if error:find("experience is closed") or error:find("server is full") or error:find("reserved server") then
+                        Rayfield:Notify({
+                            Title = "Teleport Failed",
+                            Content = "Server is either full, closed, or unavailable: " .. error,
+                            Duration = 5,
+                            Image = nil,
+                        })
+                    else
+                        -- For other errors, retry after a short delay
+                        Rayfield:Notify({
+                            Title = "Retrying...",
+                            Content = "Attempt " .. retryCount + 2 .. " in 2 seconds",
+                            Duration = 2,
+                            Image = nil,
+                        })
+                        task.delay(2, function()
+                            attemptTeleport(retryCount + 1)
+                        end)
+                    end
+                end
+            end
+        end
+        
+        -- Connect to teleport failure event
+        local connection
+        connection = TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+            if player == Players.LocalPlayer then
+                connection:Disconnect()
+                
+                print("Teleport failed:", teleportResult.Name, errorMessage)
+                
+                if teleportResult == Enum.TeleportResult.GameEnded or 
+                   teleportResult == Enum.TeleportResult.GameFull or
+                   teleportResult == Enum.TeleportResult.Unauthorized then
+                    Rayfield:Notify({
+                        Title = "Teleport Failed",
+                        Content = "Reason: " .. teleportResult.Name .. " - " .. (errorMessage or ""),
+                        Duration = 5,
+                        Image = nil,
+                    })
+                else
+                    -- Try again for other teleport failures
+                    Rayfield:Notify({
+                        Title = "Retrying teleport",
+                        Content = "First attempt failed: " .. teleportResult.Name,
+                        Duration = 2,
+                        Image = nil,
+                    })
+                    task.delay(2, function() 
+                        attemptTeleport(1)
+                    end)
+                end
+            end
+        end)
+        
+        -- Start first teleport attempt
+        task.delay(1, function()
+            attemptTeleport(0)
+        end)
+    end,
+})
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local autoAfkToggleEnabled = false  -- Estado do toggle para Anti-AFK
+
+-- Função para enviar mensagem para prevenir desconexão
+local function sendChatMessage()
+    -- Envia mensagem para manter o sistema reconhecendo a atividade do jogador
+    ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer("Auto-clicking to prevent AFK disconnection.", "All")
+    print("Simulated activity: Preventing AFK disconnection.")
+end
+
+-- Função para evitar desconexão por AFK (ao detectar a inatividade do jogador)
+local function startAntiAfk()
+    -- A cada 10 minutos, envia a mensagem para resetar o timer AFK
+    while autoAfkToggleEnabled do
+        wait(600)  -- Espera 600 segundos (10 minutos)
+        sendChatMessage()  -- Envia a mensagem para manter o jogador ativo
+    end
+end
+
+-- Parar Anti-AFK (quando toggle é desabilitado)
+local function stopAntiAfk()
+    autoAfkToggleEnabled = false
+    print("Anti-AFK disabled")
+end
+
+-- Criar o Toggle no UI para Anti-AFK
+local AntiAfkToggle = MiscTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = false,
+    Flag = "AntiAfkToggle",
+    Callback = function(Value)
+        if type(Value) == "boolean" then
+            autoAfkToggleEnabled = Value
+            print("Anti-AFK Enabled: ", autoAfkToggleEnabled)
+
+            if autoAfkToggleEnabled then
+                -- Inicia a verificação de Anti-AFK
+                startAntiAfk()  
+            else
+                -- Para a verificação de Anti-AFK
+                stopAntiAfk()   
+            end
+        else
+            warn("Expected boolean for Anti-AFK toggle, received: ", type(Value))
+        end
+    end
+})
