@@ -1124,159 +1124,146 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-
 local RunService = game:GetService("RunService")
 
 local Dropdown = TeleportTab:CreateDropdown({
-   Name = "Teleport Locations",
-   Options = {
-       "Construction Job",
-       "Warehouse",
-       "Ice Box",
-       "Land Lord",
-       "Pawn Shop",
-       "Car Dealership", 
-       "McDonalds Job"
-   },
-   CurrentOption = {}, -- Empty table means no initial selection
-   MultipleOptions = false,
-   Flag = "TeleportLocation",
-   Callback = function(Option)
-       -- Check if a location was selected
-       if #Option == 0 then
-           return -- No location selected, do nothing
-       end
-       
-       -- Get the selected location from the dropdown
-       local selectedLocation = Option[1]
-       
-       -- Define all teleport positions
-       local teleportLocations = {
-           ["Construction Job"] = Vector3.new(-1729, 370, -1171),
-           ["Warehouse"] = Vector3.new(-1563, 258, -1174),
-           ["Ice Box"] = Vector3.new(-202, 283, -1169),
-           ["Land Lord"] = Vector3.new(-209, 283, -1240),
-           ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
-           ["Car Dealership"] = Vector3.new(-374, 253, -1247),
-           ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
-       }
-       
-       -- Get the target position for teleportation
-       local targetPosition = teleportLocations[selectedLocation]
-       
-       -- Make sure the position exists
-       if targetPosition then
-           local player = game.Players.LocalPlayer
-           local character = player.Character or player.CharacterAdded:Wait()
-           local humanoid = character:WaitForChild("Humanoid")
-           local rootPart = character:WaitForChild("HumanoidRootPart")
-           
-           -- Use a consistent, moderate speed that won't trigger anti-cheat
-           local moveSpeed = 40
-           
-           -- Store original properties
-           local originalCanCollide = {}
-           for _, part in pairs(character:GetDescendants()) do
-               if part:IsA("BasePart") then
-                   originalCanCollide[part] = part.CanCollide
-               end
-           end
-           
-           -- Enable noclip
-           local noclipConnection = RunService.Stepped:Connect(function()
-               for _, part in pairs(character:GetDescendants()) do
-                   if part:IsA("BasePart") then
-                       part.CanCollide = false
-                   end
-               end
-           end)
-           
-           -- Function to clean up after teleport
-           local function cleanUp()
-               -- Disconnect noclip
-               if noclipConnection then
-                   noclipConnection:Disconnect()
-                   noclipConnection = nil
-               end
-               
-               -- Restore original collision settings
-               for part, canCollide in pairs(originalCanCollide) do
-                   if part and part:IsA("BasePart") and part:IsDescendantOf(game) then
-                       part.CanCollide = canCollide
-                   end
-               end
-               
-               -- Re-enable normal character controls
-               if humanoid and humanoid.Parent then
-                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-               end
-           end
-           
-           -- Make character uncontrollable during movement
-           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-           
-           -- Create and configure BodyVelocity with constant speed
-           local bv = Instance.new("BodyVelocity")
-           bv.MaxForce = Vector3.new(1000000, 1000000, 1000000)
-           bv.P = 1000 -- Lower P value for more consistent acceleration
-           bv.Parent = rootPart
-           
-           -- Movement loop with consistent speed
-           local movementConnection
-           movementConnection = RunService.Heartbeat:Connect(function()
-               if not (character and character.Parent and rootPart and rootPart.Parent) then
-                   if movementConnection then
-                       movementConnection:Disconnect()
-                       cleanUp()
-                       if bv and bv.Parent then
-                           bv:Destroy()
-                       end
-                   end
-                   return
-               end
-               
-               local currentPos = rootPart.Position
-               local distanceToTarget = (targetPosition - currentPos).Magnitude
-               
-               if distanceToTarget > 5 then
-                   -- Calculate direction to target
-                   local direction = (targetPosition - currentPos).Unit
-                   
-                   -- Set velocity with constant speed
-                   bv.Velocity = direction * moveSpeed
-               else
-                   -- Arrived at destination
-                   movementConnection:Disconnect()
-                   
-                   -- Final position adjustment
-                   rootPart.CFrame = CFrame.new(targetPosition)
-                   
-                   -- Remove BodyVelocity
-                   if bv and bv.Parent then
-                       bv:Destroy()
-                   end
-                   
-                   -- Clean up
-                   cleanUp()
-               end
-           end)
-           
-           -- Safety timeout
-           task.delay(120, function()
-               if movementConnection and movementConnection.Connected then
-                   movementConnection:Disconnect()
-                   if bv and bv.Parent then
-                       bv:Destroy()
-                   end
-                   cleanUp()
-               end
-           end)
-       else
-           warn("Invalid teleport location selected: " .. selectedLocation)
-       end
-   end,
+    Name = "Teleport Locations",
+    Options = {
+        "Construction Job",
+        "Warehouse",
+        "Ice Box",
+        "Land Lord",
+        "Pawn Shop",
+        "Car Dealership", 
+        "McDonalds Job"
+    },
+    CurrentOption = {}, -- Empty table means no initial selection
+    MultipleOptions = false,
+    Flag = "TeleportLocation",
+    Callback = function(Option)
+        -- Check if a location was selected
+        if #Option == 0 then
+            return -- No location selected, do nothing
+        end
+        
+        -- Get the selected location from the dropdown
+        local selectedLocation = Option[1]
+        
+        -- Define all teleport positions
+        local teleportLocations = {
+            ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+            ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+            ["Ice Box"] = Vector3.new(-202, 283, -1169),
+            ["Land Lord"] = Vector3.new(-209, 283, -1240),
+            ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+            ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+            ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+        }
+        
+        -- Get the target position for teleportation
+        local targetPosition = teleportLocations[selectedLocation]
+        
+        -- Make sure the position exists
+        if targetPosition then
+            local player = game.Players.LocalPlayer
+            local character = player.Character or player.CharacterAdded:Wait()
+            local humanoid = character:WaitForChild("Humanoid")
+            local rootPart = character:WaitForChild("HumanoidRootPart")
+            
+            -- Use a consistent speed that won't trigger anti-cheat
+            local moveSpeed = 30
+            -- Maximum vertical speed (slower than horizontal to avoid detection)
+            local maxVerticalSpeed = 10
+            
+            -- Enable noclip
+            local noclipConnection = RunService.Stepped:Connect(function()
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end)
+            
+            -- Function to clean up after teleport
+            local function cleanUp()
+                -- Disconnect noclip
+                if noclipConnection then
+                    noclipConnection:Disconnect()
+                    noclipConnection = nil
+                end
+                
+                -- Re-enable normal character controls
+                if humanoid and humanoid.Parent then
+                    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end
+            
+            -- Make character uncontrollable during movement
+            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            
+            -- Create and configure BodyVelocity with constant speed
+            local bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(1000000, 1000000, 1000000)
+            bv.P = 800 -- Lower P value for more gradual acceleration
+            bv.Parent = rootPart
+            
+            -- Calculate direction to target position
+            local direction = (targetPosition - rootPart.Position).Unit
+            
+            -- Set initial velocity
+            bv.Velocity = direction * moveSpeed
+            
+            -- Movement loop with consistent speed
+            local movementConnection
+            movementConnection = RunService.Heartbeat:Connect(function()
+                if not (character and character.Parent and rootPart and rootPart.Parent) then
+                    if movementConnection then
+                        movementConnection:Disconnect()
+                        cleanUp()
+                        if bv and bv.Parent then
+                            bv:Destroy()
+                        end
+                    end
+                    return
+                end
+                
+                local currentPos = rootPart.Position
+                local distanceToTarget = (targetPosition - currentPos).Magnitude
+                
+                if distanceToTarget > 5 then
+                    -- Maintain constant speed
+                    bv.Velocity = direction * moveSpeed
+                else
+                    -- Reached the target position
+                    movementConnection:Disconnect()
+                    
+                    -- Final position adjustment
+                    rootPart.CFrame = CFrame.new(targetPosition)
+                    
+                    -- Remove BodyVelocity
+                    if bv and bv.Parent then
+                        bv:Destroy()
+                    end
+                    
+                    -- Clean up
+                    cleanUp()
+                end
+            end)
+            
+            -- Safety timeout
+            task.delay(180, function() -- Extended timeout for the waypoint system
+                if movementConnection and movementConnection.Connected then
+                    movementConnection:Disconnect()
+                    if bv and bv.Parent then
+                        bv:Destroy()
+                    end
+                    cleanUp()
+                end
+            end)
+        else
+            warn("Invalid teleport location selected: " .. selectedLocation)
+        end
+    end,
 })
 
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
