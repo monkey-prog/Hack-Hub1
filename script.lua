@@ -1124,7 +1124,7 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
-llocal RunService = game:GetService("RunService")
+local RunService = game:GetService("RunService")
 
 local Dropdown = TeleportTab:CreateDropdown({
    Name = "Teleport Locations",
