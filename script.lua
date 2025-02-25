@@ -1124,6 +1124,9 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
 local Dropdown = TeleportTab:CreateDropdown({
    Name = "Teleport Locations",
    Options = {
@@ -1168,122 +1171,82 @@ local Dropdown = TeleportTab:CreateDropdown({
            local humanoid = character:WaitForChild("Humanoid")
            local rootPart = character:WaitForChild("HumanoidRootPart")
            
-           -- Enable noclip - this will make the character pass through objects
-           local noclip = true
-           local noclipConnection
+           -- Calculate distance to destination
+           local distance = (rootPart.Position - targetPosition).Magnitude
            
-           noclipConnection = game:GetService("RunService").Stepped:Connect(function()
-               if noclip then
-                   for _, part in pairs(character:GetDescendants()) do
-                       if part:IsA("BasePart") and part.CanCollide then
-                           part.CanCollide = false
-                       end
+           -- Determine tween duration based on distance (adjust multiplier as needed)
+           -- This creates a reasonable speed that won't trigger anti-cheat
+           local tweenDuration = distance / 100 -- seconds
+           tweenDuration = math.clamp(tweenDuration, 1, 20) -- min 1 second, max 20 seconds
+           
+           -- Store original properties
+           local originalCanCollide = {}
+           for _, part in pairs(character:GetDescendants()) do
+               if part:IsA("BasePart") then
+                   originalCanCollide[part] = part.CanCollide
+               end
+           end
+           
+           -- Enable noclip
+           local noclipConnection = RunService.Stepped:Connect(function()
+               for _, part in pairs(character:GetDescendants()) do
+                   if part:IsA("BasePart") then
+                       part.CanCollide = false
                    end
                end
            end)
            
-           -- Safe teleport speed
-           local teleportSpeed = 27 -- Moderate speed to avoid anti-cheat
+           -- Create tween
+           local tweenInfo = TweenInfo.new(
+               tweenDuration,    -- Duration
+               Enum.EasingStyle.Linear, -- EasingStyle
+               Enum.EasingDirection.InOut, -- EasingDirection
+               0,                -- RepeatCount (0 = don't repeat)
+               false,            -- Reverses (false = don't reverse)
+               0                 -- DelayTime
+           )
            
-           -- Create a BodyVelocity to control movement
-           local bodyVelocity = Instance.new("BodyVelocity")
-           bodyVelocity.MaxForce = Vector3.new(9999999, 9999999, 9999999)
-           bodyVelocity.P = 750
-           bodyVelocity.Parent = rootPart
+           local tweenGoal = {
+               CFrame = CFrame.new(targetPosition)
+           }
            
-           -- Store original properties to restore later
-           local oldGravity = workspace.Gravity
-           local originalState = humanoid:GetState()
+           local tween = TweenService:Create(rootPart, tweenInfo, tweenGoal)
            
-           -- Modify gravity temporarily to help with vertical movement
-           workspace.Gravity = 0
-           
-           -- Disable character physics/control
-           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-           
-           -- Start flying towards target
-           local flightConnection
-           flightConnection = game:GetService("RunService").Heartbeat:Connect(function()
-               if character and character.Parent and rootPart and rootPart.Parent then
-                   local currentPosition = rootPart.Position
-                   local distanceToTarget = (targetPosition - currentPosition).Magnitude
-                   
-                   if distanceToTarget > 5 then
-                       -- Calculate direction to target
-                       local direction = (targetPosition - currentPosition).Unit
-                       
-                       -- Set velocity
-                       bodyVelocity.Velocity = direction * teleportSpeed
-                   else
-                       -- Reached destination - clean up
-                       if flightConnection then
-                           flightConnection:Disconnect()
-                           flightConnection = nil
-                       end
-                       
-                       if noclipConnection then
-                           noclipConnection:Disconnect()
-                           noclipConnection = nil
-                       end
-                       
-                       -- Stop movement
-                       bodyVelocity:Destroy()
-                       
-                       -- Restore character properties
-                       workspace.Gravity = oldGravity
-                       
-                       -- Final position adjustment and restore collisions
-                       rootPart.CFrame = CFrame.new(targetPosition)
-                       humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-                       
-                       -- Re-enable collisions
-                       for _, part in pairs(character:GetDescendants()) do
-                           if part:IsA("BasePart") then
-                               part.CanCollide = true
-                           end
-                       end
-                       
-                       noclip = false
-                   end
-               else
-                   -- Character no longer exists, clean up
-                   if flightConnection then
-                       flightConnection:Disconnect()
-                       flightConnection = nil
-                   end
-                   
-                   if noclipConnection then
-                       noclipConnection:Disconnect()
-                       noclipConnection = nil
-                   end
-                   
-                   noclip = false
-                   workspace.Gravity = oldGravity
-               end
-           end)
-           
-           -- Safety timeout
-           task.delay(60, function()
-               if flightConnection and flightConnection.Connected then
-                   flightConnection:Disconnect()
-                   flightConnection = nil
-               end
-               
-               if noclipConnection and noclipConnection.Connected then
+           -- Function to clean up after teleport
+           local function cleanUp()
+               -- Disconnect noclip
+               if noclipConnection then
                    noclipConnection:Disconnect()
                    noclipConnection = nil
                end
                
-               if bodyVelocity and bodyVelocity.Parent then
-                   bodyVelocity:Destroy()
+               -- Restore original collision settings
+               for part, canCollide in pairs(originalCanCollide) do
+                   if part and part:IsA("BasePart") and part:IsDescendantOf(game) then
+                       part.CanCollide = canCollide
+                   end
                end
                
-               noclip = false
-               workspace.Gravity = oldGravity
-               
-               -- Try to restore character state if it still exists
-               if character and character:FindFirstChild("Humanoid") then
-                   character.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+               -- Re-enable normal character controls
+               humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+           end
+           
+           -- Make character uncontrollable during tween
+           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+           
+           -- Connect to Completed event to clean up
+           tween.Completed:Connect(function()
+               cleanUp()
+           end)
+           
+           -- Start the tween
+           tween:Play()
+           
+           -- Safety timeout (in case tween fails to complete)
+           task.delay(tweenDuration + 5, function()
+               if tween.PlaybackState ~= Enum.PlaybackState.Completed then
+                   tween:Cancel()
+                   cleanUp()
                end
            end)
        else
