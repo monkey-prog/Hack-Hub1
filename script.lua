@@ -1127,6 +1127,8 @@ local TeleportSection = TeleportTab:CreateSection("Teleport")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
+local RunService = game:GetService("RunService")
+
 local Dropdown = TeleportTab:CreateDropdown({
    Name = "Teleport Locations",
    Options = {
@@ -1171,13 +1173,8 @@ local Dropdown = TeleportTab:CreateDropdown({
            local humanoid = character:WaitForChild("Humanoid")
            local rootPart = character:WaitForChild("HumanoidRootPart")
            
-           -- Calculate distance to destination
-           local distance = (rootPart.Position - targetPosition).Magnitude
-           
-           -- Determine tween duration based on distance (adjust multiplier as needed)
-           -- This creates a reasonable speed that won't trigger anti-cheat
-           local tweenDuration = distance / 100 -- seconds
-           tweenDuration = math.clamp(tweenDuration, 1, 20) -- min 1 second, max 20 seconds
+           -- Use a consistent, moderate speed that won't trigger anti-cheat
+           local moveSpeed = 40
            
            -- Store original properties
            local originalCanCollide = {}
@@ -1196,22 +1193,6 @@ local Dropdown = TeleportTab:CreateDropdown({
                end
            end)
            
-           -- Create tween
-           local tweenInfo = TweenInfo.new(
-               tweenDuration,    -- Duration
-               Enum.EasingStyle.Linear, -- EasingStyle
-               Enum.EasingDirection.InOut, -- EasingDirection
-               0,                -- RepeatCount (0 = don't repeat)
-               false,            -- Reverses (false = don't reverse)
-               0                 -- DelayTime
-           )
-           
-           local tweenGoal = {
-               CFrame = CFrame.new(targetPosition)
-           }
-           
-           local tween = TweenService:Create(rootPart, tweenInfo, tweenGoal)
-           
            -- Function to clean up after teleport
            local function cleanUp()
                -- Disconnect noclip
@@ -1228,24 +1209,67 @@ local Dropdown = TeleportTab:CreateDropdown({
                end
                
                -- Re-enable normal character controls
-               humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+               if humanoid and humanoid.Parent then
+                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+               end
            end
            
-           -- Make character uncontrollable during tween
+           -- Make character uncontrollable during movement
            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
            
-           -- Connect to Completed event to clean up
-           tween.Completed:Connect(function()
-               cleanUp()
+           -- Create and configure BodyVelocity with constant speed
+           local bv = Instance.new("BodyVelocity")
+           bv.MaxForce = Vector3.new(1000000, 1000000, 1000000)
+           bv.P = 1000 -- Lower P value for more consistent acceleration
+           bv.Parent = rootPart
+           
+           -- Movement loop with consistent speed
+           local movementConnection
+           movementConnection = RunService.Heartbeat:Connect(function()
+               if not (character and character.Parent and rootPart and rootPart.Parent) then
+                   if movementConnection then
+                       movementConnection:Disconnect()
+                       cleanUp()
+                       if bv and bv.Parent then
+                           bv:Destroy()
+                       end
+                   end
+                   return
+               end
+               
+               local currentPos = rootPart.Position
+               local distanceToTarget = (targetPosition - currentPos).Magnitude
+               
+               if distanceToTarget > 5 then
+                   -- Calculate direction to target
+                   local direction = (targetPosition - currentPos).Unit
+                   
+                   -- Set velocity with constant speed
+                   bv.Velocity = direction * moveSpeed
+               else
+                   -- Arrived at destination
+                   movementConnection:Disconnect()
+                   
+                   -- Final position adjustment
+                   rootPart.CFrame = CFrame.new(targetPosition)
+                   
+                   -- Remove BodyVelocity
+                   if bv and bv.Parent then
+                       bv:Destroy()
+                   end
+                   
+                   -- Clean up
+                   cleanUp()
+               end
            end)
            
-           -- Start the tween
-           tween:Play()
-           
-           -- Safety timeout (in case tween fails to complete)
-           task.delay(tweenDuration + 5, function()
-               if tween.PlaybackState ~= Enum.PlaybackState.Completed then
-                   tween:Cancel()
+           -- Safety timeout
+           task.delay(120, function()
+               if movementConnection and movementConnection.Connected then
+                   movementConnection:Disconnect()
+                   if bv and bv.Parent then
+                       bv:Destroy()
+                   end
                    cleanUp()
                end
            end)
