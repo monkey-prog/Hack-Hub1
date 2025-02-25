@@ -1168,87 +1168,122 @@ local Dropdown = TeleportTab:CreateDropdown({
            local humanoid = character:WaitForChild("Humanoid")
            local rootPart = character:WaitForChild("HumanoidRootPart")
            
-           -- Store original properties
-           local originalWalkSpeed = humanoid.WalkSpeed
-           local originalCollisionState = {}
+           -- Enable noclip - this will make the character pass through objects
+           local noclip = true
+           local noclipConnection
            
-           -- Safe speed that won't trigger anti-cheat (adjust if needed)
-           local safeSpeed = 60
-           
-           -- Disable collisions for all parts (no-clip)
-           for _, part in pairs(character:GetDescendants()) do
-               if part:IsA("BasePart") then
-                   originalCollisionState[part] = part.CanCollide
-                   part.CanCollide = false
+           noclipConnection = game:GetService("RunService").Stepped:Connect(function()
+               if noclip then
+                   for _, part in pairs(character:GetDescendants()) do
+                       if part:IsA("BasePart") and part.CanCollide then
+                           part.CanCollide = false
+                       end
+                   end
                end
-           end
+           end)
            
-           -- Disable character control
-           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+           -- Safe teleport speed
+           local teleportSpeed = 45 -- Moderate speed to avoid anti-cheat
            
            -- Create a BodyVelocity to control movement
            local bodyVelocity = Instance.new("BodyVelocity")
-           bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+           bodyVelocity.MaxForce = Vector3.new(9999999, 9999999, 9999999)
            bodyVelocity.P = 1250
            bodyVelocity.Parent = rootPart
            
-           -- Function to clean up and restore original state
-           local function cleanUp()
-               -- Remove body velocity
+           -- Store original properties to restore later
+           local oldGravity = workspace.Gravity
+           local originalState = humanoid:GetState()
+           
+           -- Modify gravity temporarily to help with vertical movement
+           workspace.Gravity = 0
+           
+           -- Disable character physics/control
+           humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+           
+           -- Start flying towards target
+           local flightConnection
+           flightConnection = game:GetService("RunService").Heartbeat:Connect(function()
+               if character and character.Parent and rootPart and rootPart.Parent then
+                   local currentPosition = rootPart.Position
+                   local distanceToTarget = (targetPosition - currentPosition).Magnitude
+                   
+                   if distanceToTarget > 5 then
+                       -- Calculate direction to target
+                       local direction = (targetPosition - currentPosition).Unit
+                       
+                       -- Set velocity
+                       bodyVelocity.Velocity = direction * teleportSpeed
+                   else
+                       -- Reached destination - clean up
+                       if flightConnection then
+                           flightConnection:Disconnect()
+                           flightConnection = nil
+                       end
+                       
+                       if noclipConnection then
+                           noclipConnection:Disconnect()
+                           noclipConnection = nil
+                       end
+                       
+                       -- Stop movement
+                       bodyVelocity:Destroy()
+                       
+                       -- Restore character properties
+                       workspace.Gravity = oldGravity
+                       
+                       -- Final position adjustment and restore collisions
+                       rootPart.CFrame = CFrame.new(targetPosition)
+                       humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                       
+                       -- Re-enable collisions
+                       for _, part in pairs(character:GetDescendants()) do
+                           if part:IsA("BasePart") then
+                               part.CanCollide = true
+                           end
+                       end
+                       
+                       noclip = false
+                   end
+               else
+                   -- Character no longer exists, clean up
+                   if flightConnection then
+                       flightConnection:Disconnect()
+                       flightConnection = nil
+                   end
+                   
+                   if noclipConnection then
+                       noclipConnection:Disconnect()
+                       noclipConnection = nil
+                   end
+                   
+                   noclip = false
+                   workspace.Gravity = oldGravity
+               end
+           end)
+           
+           -- Safety timeout
+           task.delay(60, function()
+               if flightConnection and flightConnection.Connected then
+                   flightConnection:Disconnect()
+                   flightConnection = nil
+               end
+               
+               if noclipConnection and noclipConnection.Connected then
+                   noclipConnection:Disconnect()
+                   noclipConnection = nil
+               end
+               
                if bodyVelocity and bodyVelocity.Parent then
                    bodyVelocity:Destroy()
                end
                
-               -- Restore collision states
-               for part, state in pairs(originalCollisionState) do
-                   if part and part:IsA("BasePart") then
-                       part.CanCollide = state
-                   end
-               end
+               noclip = false
+               workspace.Gravity = oldGravity
                
-               -- Restore character control
-               humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-           end
-           
-           -- Start flying towards the target
-           local startTime = tick()
-           local flightConnection
-           flightConnection = game:GetService("RunService").Heartbeat:Connect(function()
-               -- Check if character still exists
-               if not character:IsDescendantOf(game) or not rootPart:IsDescendantOf(character) then
-                   flightConnection:Disconnect()
-                   cleanUp()
-                   return
-               end
-               
-               local currentPosition = rootPart.Position
-               local distanceToTarget = (targetPosition - currentPosition).Magnitude
-               
-               -- Calculate direction to target
-               local direction = (targetPosition - currentPosition).Unit
-               
-               if distanceToTarget > 5 then
-                   -- Move towards target
-                   bodyVelocity.Velocity = direction * safeSpeed
-               else
-                   -- We've reached the destination
-                   flightConnection:Disconnect()
-                   
-                   -- Final position adjustment
-                   rootPart.CFrame = CFrame.new(targetPosition)
-                   bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                   
-                   -- Clean up and restore original state
-                   cleanUp()
-               end
-           end)
-           
-           -- Safety disconnect after 60 seconds (in case something goes wrong)
-           task.delay(60, function()
-               if flightConnection.Connected then
-                   flightConnection:Disconnect()
-                   cleanUp()
-                   warn("Teleport timed out after 60 seconds")
+               -- Try to restore character state if it still exists
+               if character and character:FindFirstChild("Humanoid") then
+                   character.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
                end
            end)
        else
