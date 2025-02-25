@@ -1183,7 +1183,7 @@ local Dropdown = TeleportTab:CreateDropdown({
            end)
            
            -- Safe teleport speed
-           local teleportSpeed = 45 -- Moderate speed to avoid anti-cheat
+           local teleportSpeed = 35 -- Moderate speed to avoid anti-cheat
            
            -- Create a BodyVelocity to control movement
            local bodyVelocity = Instance.new("BodyVelocity")
