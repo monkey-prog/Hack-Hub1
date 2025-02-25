@@ -1124,7 +1124,7 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
-local RunService = game:GetService("RunService")
+llocal RunService = game:GetService("RunService")
 
 local Dropdown = TeleportTab:CreateDropdown({
    Name = "Teleport Locations",
@@ -1194,6 +1194,34 @@ local Dropdown = TeleportTab:CreateDropdown({
                end
            end
            
+           -- Create a black screen transition
+           local screenGui = Instance.new("ScreenGui")
+           screenGui.Name = "TeleportTransition"
+           screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+           screenGui.DisplayOrder = 999
+           screenGui.IgnoreGuiInset = true
+           
+           local blackFrame = Instance.new("Frame")
+           blackFrame.Name = "BlackTransition"
+           blackFrame.Size = UDim2.new(1, 0, 1, 0)
+           blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+           blackFrame.BackgroundTransparency = 1
+           blackFrame.BorderSizePixel = 0
+           blackFrame.Parent = screenGui
+           
+           screenGui.Parent = player.PlayerGui
+           
+           -- Fade in black screen
+           local tweenService = game:GetService("TweenService")
+           local fadeInTween = tweenService:Create(
+               blackFrame, 
+               TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+               {BackgroundTransparency = 0}
+           )
+           
+           fadeInTween:Play()
+           task.wait(0.6) -- Wait for fade to complete + small buffer
+           
            -- Enable noclip with absolute collision prevention
            local noclipConnection = RunService.Stepped:Connect(function()
                if not _G.SafeTeleportActive then return end
@@ -1241,76 +1269,45 @@ local Dropdown = TeleportTab:CreateDropdown({
                        part.CanCollide = value
                    end
                end
-           end
-           
-           -- Function for extremely slow incremental teleportation
-           local function safeIncrementalTeleport()
-               local startPosition = rootPart.Position
-               local direction = (targetPosition - startPosition).Unit
-               local totalDistance = (targetPosition - startPosition).Magnitude
                
-               -- Very small step size to avoid detection
-               local stepSize = 3 -- 3 studs per step
-               local totalSteps = math.ceil(totalDistance / stepSize)
-               local currentStep = 0
-               local waitTime = 0.05 -- 50ms between steps
+               -- Fade out black screen
+               local fadeOutTween = tweenService:Create(
+                   blackFrame, 
+                   TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), 
+                   {BackgroundTransparency = 1}
+               )
                
-               -- Set up temporary character state for teleportation
-               humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-               humanoid.PlatformStand = true
+               fadeOutTween:Play()
                
-               -- Loop to incrementally teleport
-               local teleportLoop
-               teleportLoop = function()
-                   if not _G.SafeTeleportActive or not rootPart or not rootPart.Parent then
-                       cleanUp()
-                       return
-                   end
-                   
-                   -- Calculate current step position
-                   currentStep = currentStep + 1
-                   
-                   -- Check if we've completed all steps
-                   if currentStep > totalSteps then
-                       -- Final position adjustment
-                       rootPart.CFrame = CFrame.new(targetPosition)
-                       task.wait(0.1)
-                       cleanUp()
-                       return
-                   end
-                   
-                   -- Calculate step progress and position
-                   local progress = currentStep / totalSteps
-                   local newPosition = startPosition:Lerp(targetPosition, progress)
-                   
-                   -- Set position
-                   rootPart.CFrame = CFrame.new(newPosition)
-                   
-                   -- Wait before next step
-                   task.wait(waitTime)
-                   
-                   -- Continue loop if still active
-                   if _G.SafeTeleportActive then
-                       task.spawn(teleportLoop)
-                   else
-                       cleanUp()
-                   end
-               end
-               
-               -- Start the loop
-               task.spawn(teleportLoop)
-               
-               -- Safety timeout (30 seconds max)
-               task.delay(30, function()
-                   if _G.SafeTeleportActive then
-                       rootPart.CFrame = CFrame.new(targetPosition)
-                       cleanUp()
+               -- Remove screen GUI after fade out
+               task.delay(0.6, function()
+                   if screenGui and screenGui.Parent then
+                       screenGui:Destroy()
                    end
                end)
            end
            
+           -- Direct teleport instead of incremental (since we have screen transition now)
+           local function directTeleport()
+               -- Apply teleport while screen is black
+               rootPart.CFrame = CFrame.new(targetPosition)
+               
+               -- Small wait to ensure rendering has caught up
+               task.wait(0.2)
+               
+               -- Clean up and fade out black screen
+               cleanUp()
+           end
+           
            -- Start the teleport
-           safeIncrementalTeleport()
+           directTeleport()
+           
+           -- Safety timeout (5 seconds max)
+           task.delay(5, function()
+               if _G.SafeTeleportActive then
+                   cleanUp()
+               end
+           end)
        else
            warn("Invalid teleport location selected: " .. selectedLocation)
        end
