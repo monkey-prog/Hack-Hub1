@@ -1184,6 +1184,9 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end
             end
             
+            -- Simulate gravity
+            local gravity = Vector3.new(0, -10, 0)
+            
             -- Use TweenService for smooth movement
             local tweenInfo = TweenInfo.new(
                 (targetPosition - rootPart.Position).Magnitude / moveSpeed, -- Time based on distance and speed
