@@ -98,6 +98,10 @@ local function CreateESP(Player)
         
         local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
         local Humanoid = Player.Character:FindFirstChild("Humanoid")
+        
+        -- Skip if humanoid doesn't exist
+        if not Humanoid then return end
+        
         local oldTeam = ESP_Objects[Player] and ESP_Objects[Player].Team or nil
         local Team = Player.Team and Player.Team.Name or "Neutral"
         local LineColor = TeamColors[Team] or Color3.fromRGB(255, 255, 255) -- Default white
@@ -158,8 +162,16 @@ local function CreateESP(Player)
             RadarDot = RadarDot, 
             HRP = HRP, 
             Humanoid = Humanoid,
-            Team = Team 
+            Team = Team,
+            IsAlive = true -- Track if player is alive
         }
+        
+        -- Connect to humanoid events to track life state
+        Humanoid.Died:Connect(function()
+            if ESP_Objects[Player] then
+                ESP_Objects[Player].IsAlive = false
+            end
+        end)
     end
 
     -- Initial ESP creation
@@ -175,6 +187,18 @@ local function CreateESP(Player)
 
     -- Update ESP when the player switches teams
     Player:GetPropertyChangedSignal("Team"):Connect(UpdatePlayerESP)
+    
+    -- Update ESP when character changes (respawn)
+    Player.CharacterAdded:Connect(function(Character)
+        -- Wait a moment for the character to fully load
+        task.wait(0.5)
+        UpdatePlayerESP()
+        
+        -- Reset alive status when player respawns
+        if ESP_Objects[Player] then
+            ESP_Objects[Player].IsAlive = true
+        end
+    end)
 end
 
 -- Function to remove ESP when a player leaves
@@ -279,7 +303,13 @@ local function UpdateESP()
     RadarCenter.Visible = true
     
     for Player, Data in pairs(ESP_Objects) do
-        if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") and Data.Humanoid then
+        -- Check if player character exists, has an HRP, and has a valid humanoid
+        if Player.Character and 
+           Player.Character:FindFirstChild("HumanoidRootPart") and 
+           Data.Humanoid and 
+           Data.IsAlive and -- Check if player is alive
+           Data.Humanoid.Health > 0 then -- Check if player has health
+            
             local HRP = Data.HRP
             local Humanoid = Data.Humanoid
             local ScreenPos, OnScreen = Camera:WorldToViewportPoint(HRP.Position)
@@ -337,12 +367,17 @@ local function UpdateESP()
                 Data.RadarDot.Visible = false
             end
         else
-            -- Hide ESP if player character is not available
+            -- Hide ESP if player character is not available or player is dead
             if ESP_Objects[Player] then
                 ESP_Objects[Player].Box.Visible = false
                 ESP_Objects[Player].Line.Visible = false
                 ESP_Objects[Player].Text.Visible = false
                 ESP_Objects[Player].RadarDot.Visible = false
+                
+                -- Check if the player's health is 0
+                if Data.Humanoid and Data.Humanoid.Health <= 0 then
+                    Data.IsAlive = false
+                end
             end
         end
     end
