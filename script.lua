@@ -1183,12 +1183,12 @@ local Dropdown = TeleportTab:CreateDropdown({
            end)
            
            -- Safe teleport speed
-           local teleportSpeed = 35 -- Moderate speed to avoid anti-cheat
+           local teleportSpeed = 27 -- Moderate speed to avoid anti-cheat
            
            -- Create a BodyVelocity to control movement
            local bodyVelocity = Instance.new("BodyVelocity")
            bodyVelocity.MaxForce = Vector3.new(9999999, 9999999, 9999999)
-           bodyVelocity.P = 1250
+           bodyVelocity.P = 750
            bodyVelocity.Parent = rootPart
            
            -- Store original properties to restore later
