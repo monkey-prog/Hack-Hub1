@@ -53,7 +53,6 @@ local UserInputService = game:GetService("UserInputService")
 
 -- Table to store ESP & radar data
 local ESP_Objects = {}
-local Radar_Dots = {}
 local ESPEnabled = false -- Flag to track if ESP is enabled
 
 -- Radar Settings
@@ -124,23 +123,24 @@ local function CreateESP(Player)
 
         -- Create new ESP elements
         local Box = Drawing.new("Square")
-        Box.Thickness = 3  -- FIXED: Increased thickness for better visibility
+        Box.Thickness = 2
         Box.Color = BoxColor
         Box.Filled = false
         Box.Transparency = 1
         Box.Visible = false
 
         local Line = Drawing.new("Line")
-        Line.Thickness = 2
+        Line.Thickness = 1.5
         Line.Color = LineColor
         Line.Transparency = 1
         Line.Visible = false
 
         local Text = Drawing.new("Text")
-        Text.Size = 15
+        Text.Size = 14
         Text.Color = Color3.fromRGB(255, 255, 255) -- White text
         Text.Center = true
         Text.Outline = true
+        Text.OutlineColor = Color3.fromRGB(0, 0, 0) -- Black outline for better visibility
         Text.Transparency = 1
         Text.Visible = false
 
@@ -188,30 +188,36 @@ local function RemoveESP(Player)
     end
 end
 
--- Function to properly calculate character size for better box fitting
-local function GetCharacterSize(Character)
-    if not Character then return Vector3.new(3, 5, 2) end -- Default size if character not available
+-- Function to properly calculate character size for box dimensions
+local function CalculateBoxDimensions(Character, ScreenPos, Distance)
+    if not Character then return Vector2.new(40, 60) end -- Default size if character not available
     
-    local minX, minY, minZ = math.huge, math.huge, math.huge
-    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    -- Get the head and root parts for more accurate calculations
+    local Head = Character:FindFirstChild("Head")
+    local Root = Character:FindFirstChild("HumanoidRootPart")
     
-    -- Loop through all parts to find bounds
-    for _, part in pairs(Character:GetChildren()) do
-        if part:IsA("BasePart") then
-            minX = math.min(minX, part.Position.X - part.Size.X/2)
-            minY = math.min(minY, part.Position.Y - part.Size.Y/2)
-            minZ = math.min(minZ, part.Position.Z - part.Size.Z/2)
-            
-            maxX = math.max(maxX, part.Position.X + part.Size.X/2)
-            maxY = math.max(maxY, part.Position.Y + part.Size.Y/2)
-            maxZ = math.max(maxZ, part.Position.Z + part.Size.Z/2)
-        end
+    if not Head or not Root then
+        -- Use distance-based scaling with fixed ratio if parts aren't available
+        local scaleFactor = 1 / (Distance * 0.05 + 1)
+        local height = math.max(40, 70 * scaleFactor)
+        local width = height * 0.5
+        return Vector2.new(width, height)
     end
     
-    -- If we couldn't find any parts, return default
-    if minX == math.huge then return Vector3.new(3, 5, 2) end
+    -- Get screen positions of top (head) and bottom (root) of the character
+    local headPos = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
+    local rootPos = Camera:WorldToViewportPoint(Root.Position - Vector3.new(0, 2.5, 0))
     
-    return Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+    -- Calculate height using vertical distance between head and root on screen
+    local height = math.abs(headPos.Y - rootPos.Y)
+    
+    -- Ensure minimum size for visibility at distance
+    height = math.max(40, height)
+    
+    -- Calculate width maintaining human body aspect ratio (approximately 1:2.5)
+    local width = height * 0.4
+    
+    return Vector2.new(width, height)
 end
 
 -- Update radar position based on mouse movement when dragging
@@ -279,59 +285,59 @@ local function UpdateESP()
             local ScreenPos, OnScreen = Camera:WorldToViewportPoint(HRP.Position)
             local Distance = math.floor((HRP.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude)
             
-            -- CRITICAL FIX: Always update and show the ESP boxes regardless of OnScreen check
+            -- Calculate box dimensions based on character properties and distance
+            local BoxDimensions = CalculateBoxDimensions(Player.Character, ScreenPos, Distance)
             
-            -- Get character size but with fixed minimum values
-            local CharSize = GetCharacterSize(Player.Character)
+            -- Set box position correctly centered on the character
+            Data.Box.Size = BoxDimensions
+            Data.Box.Position = Vector2.new(
+                ScreenPos.X - (BoxDimensions.X / 2),
+                ScreenPos.Y - (BoxDimensions.Y / 2)
+            )
             
-            -- Hardcoded minimum size for boxes to ensure visibility
-            local MinBoxHeight = 60  -- Increased minimum box height
-            local MinBoxWidth = 35   -- Increased minimum box width
+            -- Update visibility based on whether the player is on screen
+            Data.Box.Visible = OnScreen
             
-            -- FIXED: Drastically reduced distance impact on scaling to ensure boxes are visible at all distances
-            local ScaleFactor = 1 / (Distance * 0.003 + 1)
-            
-            -- Calculate box dimensions
-            local TopY = ScreenPos.Y - (CharSize.Y * 0.55) * ScaleFactor
-            local BottomY = ScreenPos.Y + (CharSize.Y * 0.15) * ScaleFactor
-            local BoxHeight = math.max(BottomY - TopY, MinBoxHeight)
-            local BoxWidth = math.max(BoxHeight * 0.6, MinBoxWidth)
-            
-            -- Guaranteed box display: force boxes to be visible with proper dimensions
-            Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
-            Data.Box.Position = Vector2.new(ScreenPos.X - BoxWidth/2, TopY)
-            
-            -- MAJOR FIX: Always display the box regardless of whether player is on screen
-            Data.Box.Visible = true
-            
-            -- FIXED: Ensure correct team colors
+            -- Update team colors
             local teamName = Player.Team and Player.Team.Name or "Neutral"
             local correctLineColor = TeamColors[teamName] or Color3.fromRGB(255, 255, 255)
             Data.Line.Color = correctLineColor
             Data.RadarDot.Color = correctLineColor
 
             -- ESP Line
-            Data.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            Data.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y - 50)
             Data.Line.To = Vector2.new(ScreenPos.X, ScreenPos.Y)
-            Data.Line.Visible = true
+            Data.Line.Visible = OnScreen
 
-            -- ESP Text
+            -- ESP Text (positioned above the box)
             Data.Text.Text = string.format("%d M | %s | %d HP", Distance, Player.DisplayName, math.floor(Humanoid.Health))
-            Data.Text.Position = Vector2.new(ScreenPos.X, TopY - 15)
-            Data.Text.Visible = true
+            Data.Text.Position = Vector2.new(ScreenPos.X, ScreenPos.Y - (BoxDimensions.Y / 2) - 15)
+            Data.Text.Visible = OnScreen
 
             -- Radar Logic
             local LocalHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if LocalHRP then
+                -- Get 2D position for radar (using top-down view, so X and Z components)
                 local RelativePosition = (HRP.Position - LocalHRP.Position) / RadarScale
-                local RadarX = math.clamp(RadarSize / 2 + RelativePosition.X, 5, RadarSize - 5)
-                local RadarY = math.clamp(RadarSize / 2 + RelativePosition.Z, 5, RadarSize - 5)
+                
+                -- Calculate yaw angle from LocalPlayer to convert positions correctly
+                local lookAngle = math.atan2(LocalHRP.CFrame.LookVector.X, LocalHRP.CFrame.LookVector.Z)
+                
+                -- Rotate position for radar (so forward is always up on radar)
+                local rotatedX = RelativePosition.X * math.cos(lookAngle) - RelativePosition.Z * math.sin(lookAngle)
+                local rotatedZ = RelativePosition.X * math.sin(lookAngle) + RelativePosition.Z * math.cos(lookAngle)
+                
+                -- Calculate radar position and clamp to radar bounds
+                local RadarX = math.clamp(RadarSize / 2 + rotatedX, 5, RadarSize - 5)
+                local RadarY = math.clamp(RadarSize / 2 - rotatedZ, 5, RadarSize - 5)
+                
                 Data.RadarDot.Position = RadarPosition + Vector2.new(RadarX, RadarY)
                 Data.RadarDot.Visible = true
             else
                 Data.RadarDot.Visible = false
             end
         else
+            -- Hide ESP if player character is not available
             if ESP_Objects[Player] then
                 ESP_Objects[Player].Box.Visible = false
                 ESP_Objects[Player].Line.Visible = false
@@ -374,7 +380,7 @@ Players.PlayerRemoving:Connect(RemoveESP)
 -- Update loop
 RunService.RenderStepped:Connect(UpdateESP)
 
--- Advanced Aimbot System
+-- Fully Automatic Aimbot System
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -383,16 +389,19 @@ local Camera = workspace.CurrentCamera
 
 -- Aimbot Configuration
 local AimbotSettings = {
-    Enabled = false,        -- Toggle state
-    TargetPart = "Head",    -- Body part to target
-    TeamCheck = true,       -- Skip teammates
-    VisibilityCheck = true, -- Check if target is visible
-    MaxDistance = 1000,     -- Maximum targeting distance 
-    Sensitivity = 0.5,      -- Lower = smoother aimbot (0.1 to 1)
-    FOVRadius = 400,        -- Field of view circle size
-    ShowFOV = true,         -- Show FOV circle
-    AimKey = Enum.UserInputType.MouseButton2,  -- Right mouse button
-    IgnorePlayers = {}      -- List of players to ignore
+    Enabled = false,            -- Toggle state
+    TargetPart = "Head",        -- Body part to target (default)
+    TeamCheck = true,           -- Skip teammates
+    VisibilityCheck = true,     -- Check if target is visible
+    MaxDistance = 200,          -- Maximum targeting distance (in studs)
+    PriorityDistance = 100,     -- Distance to prioritize visible targets
+    WallTargetDistance = 50,    -- Distance to still target players behind walls
+    AlwaysActive = true,        -- No need to press aim key
+    InstantTrack = true,        -- Instant tracking (no smoothing)
+    FOVRadius = 500,            -- Increased FOV circle size for better acquisition
+    ShowFOV = true,             -- Show FOV circle
+    IgnorePlayers = {},         -- List of players to ignore
+    TargetPriority = "Closest"  -- Target priority method: "Closest", "LowestHealth", "HighestThreat"
 }
 
 -- Drawing objects
@@ -406,9 +415,10 @@ FOVCircle.Radius = AimbotSettings.FOVRadius
 FOVCircle.Visible = false
 
 -- Variables
-local IsAiming = false
-local ClosestPlayer = nil
-local ClosestDistance = math.huge
+local CurrentTarget = nil
+local LastTargetTime = 0
+local TargetAcquired = false
+local TargetLockDuration = 1.5 -- Duration to lock onto a target (in seconds)
 
 -- Function to check if a point is visible
 local function IsVisible(Position, Target)
@@ -425,12 +435,9 @@ local function IsVisible(Position, Target)
     return Result == nil
 end
 
--- Function to get closest player within FOV
-local function GetClosestPlayerInFOV()
-    ClosestDistance = AimbotSettings.FOVRadius
-    ClosestPlayer = nil
-    
-    local MousePosition = UserInputService:GetMouseLocation()
+-- Function to find all valid targets
+local function GetValidTargets()
+    local ValidTargets = {}
     
     for _, Player in pairs(Players:GetPlayers()) do
         if Player == LocalPlayer then continue end
@@ -445,42 +452,109 @@ local function GetClosestPlayerInFOV()
         
         -- Target part check
         local TargetPart = Player.Character:FindFirstChild(AimbotSettings.TargetPart)
-        if not TargetPart then continue end
+        if not TargetPart then 
+            -- Fallback to HumanoidRootPart if the target part doesn't exist
+            TargetPart = Player.Character:FindFirstChild("HumanoidRootPart")
+            if not TargetPart then continue end
+        end
         
         -- Distance check
         local Distance = (TargetPart.Position - Camera.CFrame.Position).Magnitude
         if Distance > AimbotSettings.MaxDistance then continue end
         
         -- Visibility check
-        if not IsVisible(TargetPart.Position, Player.Character) then continue end
+        local IsTargetVisible = IsVisible(TargetPart.Position, Player.Character)
         
-        -- Screen position check
-        local ScreenPosition, OnScreen = Camera:WorldToViewportPoint(TargetPart.Position)
-        if not OnScreen then continue end
-        
-        -- FOV check
-        local ScreenDistance = (MousePosition - Vector2.new(ScreenPosition.X, ScreenPosition.Y)).Magnitude
-        if ScreenDistance > AimbotSettings.FOVRadius then continue end
-        
-        -- Check if this player is closer than the current closest
-        if ScreenDistance < ClosestDistance then
-            ClosestDistance = ScreenDistance
-            ClosestPlayer = Player
+        -- Prioritize visible targets within priority distance
+        if IsTargetVisible or Distance <= AimbotSettings.WallTargetDistance then
+            -- Calculate threat level (customizable)
+            local ThreatLevel = 0
+            
+            -- Basic threat calculation based on distance and visibility
+            if IsTargetVisible then
+                ThreatLevel = ThreatLevel + 10
+            end
+            
+            if Distance <= 25 then
+                ThreatLevel = ThreatLevel + 20
+            elseif Distance <= 50 then
+                ThreatLevel = ThreatLevel + 10
+            elseif Distance <= 100 then
+                ThreatLevel = ThreatLevel + 5
+            end
+            
+            -- Add to valid targets
+            table.insert(ValidTargets, {
+                Player = Player,
+                Distance = Distance,
+                Health = Player.Character.Humanoid.Health,
+                TargetPart = TargetPart,
+                Visible = IsTargetVisible,
+                ThreatLevel = ThreatLevel
+            })
         end
     end
     
-    return ClosestPlayer
+    return ValidTargets
+end
+
+-- Function to get best target based on priority method
+local function GetBestTarget()
+    local ValidTargets = GetValidTargets()
+    if #ValidTargets == 0 then return nil end
+    
+    -- Sort targets based on priority method
+    if AimbotSettings.TargetPriority == "Closest" then
+        table.sort(ValidTargets, function(a, b)
+            -- Prioritize close and visible targets
+            if a.Visible and not b.Visible then
+                return true
+            elseif not a.Visible and b.Visible then
+                return false
+            else
+                return a.Distance < b.Distance
+            end
+        end)
+    elseif AimbotSettings.TargetPriority == "LowestHealth" then
+        table.sort(ValidTargets, function(a, b)
+            return a.Health < b.Health
+        end)
+    elseif AimbotSettings.TargetPriority == "HighestThreat" then
+        table.sort(ValidTargets, function(a, b)
+            return a.ThreatLevel > b.ThreatLevel
+        end)
+    end
+    
+    -- Maintain target lock for a period to prevent rapid switching
+    if CurrentTarget and time() - LastTargetTime < TargetLockDuration then
+        -- Check if current target is still valid
+        for _, Target in ipairs(ValidTargets) do
+            if Target.Player == CurrentTarget then
+                return CurrentTarget
+            end
+        end
+    end
+    
+    -- Return the best target
+    LastTargetTime = time()
+    return ValidTargets[1].Player
 end
 
 -- Function to aim at a target
 local function AimAt(Target)
-    if not Target or not Target.Character or not Target.Character:FindFirstChild(AimbotSettings.TargetPart) then return end
+    if not Target or not Target.Character then return end
     
     local TargetPart = Target.Character:FindFirstChild(AimbotSettings.TargetPart)
+    if not TargetPart then
+        -- Fallback to HumanoidRootPart if the target part doesn't exist
+        TargetPart = Target.Character:FindFirstChild("HumanoidRootPart")
+        if not TargetPart then return end
+    end
+    
     local TargetPosition = TargetPart.Position
     
-    -- Add prediction for moving targets (basic)
-    if Target.Character:FindFirstChild("Humanoid") and Target.Character.Humanoid.MoveDirection.Magnitude > 0 then
+    -- Add prediction for moving targets
+    if Target.Character:FindFirstChild("HumanoidRootPart") then
         local Velocity = Target.Character.HumanoidRootPart.Velocity
         TargetPosition = TargetPosition + (Velocity * 0.05) -- Basic prediction factor
     end
@@ -488,9 +562,16 @@ local function AimAt(Target)
     -- Calculate the direction
     local TargetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPosition)
     
-    -- Smoothly interpolate camera rotation
-    local LerpFactor = AimbotSettings.Sensitivity
-    Camera.CFrame = Camera.CFrame:Lerp(TargetCFrame, LerpFactor)
+    -- Instant tracking mode
+    if AimbotSettings.InstantTrack then
+        Camera.CFrame = TargetCFrame
+    else
+        -- Fallback to smooth tracking if instant is disabled
+        local LerpFactor = 0.5 -- Smoothness factor
+        Camera.CFrame = Camera.CFrame:Lerp(TargetCFrame, LerpFactor)
+    end
+    
+    TargetAcquired = true
 end
 
 -- Toggle the aimbot
@@ -499,6 +580,12 @@ local function ToggleAimbot(Value)
     
     -- Update FOV circle
     FOVCircle.Visible = Value and AimbotSettings.ShowFOV
+    
+    -- Reset target when disabling
+    if not Value then
+        CurrentTarget = nil
+        TargetAcquired = false
+    end
     
     -- Notification
     Rayfield:Notify({
@@ -509,7 +596,7 @@ local function ToggleAimbot(Value)
     })
 end
 
--- Update FOV circle position
+-- Main aimbot logic - runs every frame
 RunService.RenderStepped:Connect(function()
     -- Update FOV circle
     if AimbotSettings.ShowFOV and AimbotSettings.Enabled then
@@ -521,24 +608,17 @@ RunService.RenderStepped:Connect(function()
     end
     
     -- Handle aimbot logic
-    if AimbotSettings.Enabled and IsAiming then
-        local Target = GetClosestPlayerInFOV()
+    if AimbotSettings.Enabled and AimbotSettings.AlwaysActive then
+        -- Get best target
+        local Target = GetBestTarget()
+        
+        -- Update current target
         if Target then
-            AimAt(Target)
+            CurrentTarget = Target
+            AimAt(CurrentTarget)
+        else
+            TargetAcquired = false
         end
-    end
-end)
-
--- Input handling for aim key
-UserInputService.InputBegan:Connect(function(Input)
-    if Input.UserInputType == AimbotSettings.AimKey then
-        IsAiming = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(Input)
-    if Input.UserInputType == AimbotSettings.AimKey then
-        IsAiming = false
     end
 end)
 
@@ -552,49 +632,34 @@ local AimbotToggle = MainTab:CreateToggle({
     end,
 })
 
--- Add sensitivity slider
-local SensitivitySlider = MainTab:CreateSlider({
-    Name = "Aimbot Smoothness",
-    Range = {0.1, 1},
-    Increment = 0.05,
-    Suffix = "x",
-    CurrentValue = 0.5,
-    Flag = "AimbotSensitivity",
-    Callback = function(Value)
-        AimbotSettings.Sensitivity = Value
-    end,
-})
-
--- Add FOV radius slider
-local FOVRadiusSlider = MainTab:CreateSlider({
-    Name = "FOV Radius",
-    Range = {50, 800},
-    Increment = 25,
-    Suffix = "px",
-    CurrentValue = 400,
-    Flag = "AimbotFOVRadius",
-    Callback = function(Value)
-        AimbotSettings.FOVRadius = Value
-    end,
-})
-
--- FOV Circle visibility toggle
-local FOVCircleToggle = MainTab:CreateToggle({
-    Name = "Show FOV Circle",
+-- Add always active toggle
+local AlwaysActiveToggle = MainTab:CreateToggle({
+    Name = "Always Active (No Key Required)",
     CurrentValue = true,
-    Flag = "ShowFOVCircle",
+    Flag = "AlwaysActive",
     Callback = function(Value)
-        AimbotSettings.ShowFOV = Value
+        AimbotSettings.AlwaysActive = Value
     end,
 })
 
--- Team check toggle
-local TeamCheckToggle = MainTab:CreateToggle({
-    Name = "Team Check",
+-- Add instant tracking toggle
+local InstantTrackToggle = MainTab:CreateToggle({
+    Name = "Instant Tracking",
     CurrentValue = true,
-    Flag = "TeamCheck",
+    Flag = "InstantTracking",
     Callback = function(Value)
-        AimbotSettings.TeamCheck = Value
+        AimbotSettings.InstantTrack = Value
+    end,
+})
+
+-- Target priority dropdown
+local PriorityDropdown = MainTab:CreateDropdown({
+    Name = "Target Priority",
+    Options = {"Closest", "LowestHealth", "HighestThreat"},
+    CurrentOption = "Closest",
+    Flag = "TargetPriority",
+    Callback = function(Option)
+        AimbotSettings.TargetPriority = Option
     end,
 })
 
@@ -609,16 +674,59 @@ local TargetPartDropdown = MainTab:CreateDropdown({
     end,
 })
 
--- Keybind for aimbot activation key
-MainTab:CreateKeybind({
-    Name = "Aim Key",
-    CurrentKeybind = "MouseButton2",
-    HoldToInteract = false,
-    Flag = "AimbotKey",
-    Callback = function(Keybind)
-        if typeof(Keybind) == "EnumItem" then
-            AimbotSettings.AimKey = Keybind
-        end
+-- Add maximum distance slider
+local MaxDistanceSlider = MainTab:CreateSlider({
+    Name = "Maximum Distance",
+    Range = {50, 500},
+    Increment = 10,
+    Suffix = "m",
+    CurrentValue = 200,
+    Flag = "MaxDistance",
+    Callback = function(Value)
+        AimbotSettings.MaxDistance = Value
+    end,
+})
+
+-- FOV radius slider
+local FOVRadiusSlider = MainTab:CreateSlider({
+    Name = "FOV Radius",
+    Range = {100, 1000},
+    Increment = 50,
+    Suffix = "px",
+    CurrentValue = 500,
+    Flag = "FOVRadius",
+    Callback = function(Value)
+        AimbotSettings.FOVRadius = Value
+    end,
+})
+
+-- Team check toggle
+local TeamCheckToggle = MainTab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = true,
+    Flag = "TeamCheck",
+    Callback = function(Value)
+        AimbotSettings.TeamCheck = Value
+    end,
+})
+
+-- Show FOV circle toggle
+local ShowFOVToggle = MainTab:CreateToggle({
+    Name = "Show FOV Circle",
+    CurrentValue = true,
+    Flag = "ShowFOV",
+    Callback = function(Value)
+        AimbotSettings.ShowFOV = Value
+    end,
+})
+
+-- Visibility check toggle
+local VisibilityCheckToggle = MainTab:CreateToggle({
+    Name = "Visibility Check",
+    CurrentValue = true,
+    Flag = "VisibilityCheck",
+    Callback = function(Value)
+        AimbotSettings.VisibilityCheck = Value
     end,
 })
 
