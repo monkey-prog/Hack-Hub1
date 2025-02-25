@@ -1125,6 +1125,7 @@ local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local Dropdown = TeleportTab:CreateDropdown({
     Name = "Teleport Locations",
@@ -1171,93 +1172,33 @@ local Dropdown = TeleportTab:CreateDropdown({
             local rootPart = character:WaitForChild("HumanoidRootPart")
             
             -- Use a consistent speed that won't trigger anti-cheat
-            local moveSpeed = 30
-            -- Maximum vertical speed (slower than horizontal to avoid detection)
-            local maxVerticalSpeed = 10
+            local moveSpeed = 15 -- Reduced speed
             
-            -- Enable noclip
-            local noclipConnection = RunService.Stepped:Connect(function()
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = false
-                    end
-                end
-            end)
+            -- Add a random delay before starting
+            task.wait(math.random(1, 3))
             
-            -- Function to clean up after teleport
-            local function cleanUp()
-                -- Disconnect noclip
-                if noclipConnection then
-                    noclipConnection:Disconnect()
-                    noclipConnection = nil
-                end
-                
-                -- Re-enable normal character controls
-                if humanoid and humanoid.Parent then
-                    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            -- Enable NoClip
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
                 end
             end
             
-            -- Make character uncontrollable during movement
-            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            -- Use TweenService for smooth movement
+            local tweenInfo = TweenInfo.new(
+                (targetPosition - rootPart.Position).Magnitude / moveSpeed, -- Time based on distance and speed
+                Enum.EasingStyle.Linear
+            )
             
-            -- Create and configure BodyVelocity with constant speed
-            local bv = Instance.new("BodyVelocity")
-            bv.MaxForce = Vector3.new(1000000, 1000000, 1000000)
-            bv.P = 800 -- Lower P value for more gradual acceleration
-            bv.Parent = rootPart
+            local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(targetPosition)})
+            tween:Play()
             
-            -- Calculate direction to target position
-            local direction = (targetPosition - rootPart.Position).Unit
-            
-            -- Set initial velocity
-            bv.Velocity = direction * moveSpeed
-            
-            -- Movement loop with consistent speed
-            local movementConnection
-            movementConnection = RunService.Heartbeat:Connect(function()
-                if not (character and character.Parent and rootPart and rootPart.Parent) then
-                    if movementConnection then
-                        movementConnection:Disconnect()
-                        cleanUp()
-                        if bv and bv.Parent then
-                            bv:Destroy()
-                        end
+            tween.Completed:Connect(function()
+                -- Disable NoClip after reaching the destination
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = true
                     end
-                    return
-                end
-                
-                local currentPos = rootPart.Position
-                local distanceToTarget = (targetPosition - currentPos).Magnitude
-                
-                if distanceToTarget > 5 then
-                    -- Maintain constant speed
-                    bv.Velocity = direction * moveSpeed
-                else
-                    -- Reached the target position
-                    movementConnection:Disconnect()
-                    
-                    -- Final position adjustment
-                    rootPart.CFrame = CFrame.new(targetPosition)
-                    
-                    -- Remove BodyVelocity
-                    if bv and bv.Parent then
-                        bv:Destroy()
-                    end
-                    
-                    -- Clean up
-                    cleanUp()
-                end
-            end)
-            
-            -- Safety timeout
-            task.delay(180, function() -- Extended timeout for the waypoint system
-                if movementConnection and movementConnection.Connected then
-                    movementConnection:Disconnect()
-                    if bv and bv.Parent then
-                        bv:Destroy()
-                    end
-                    cleanUp()
                 end
             end)
         else
