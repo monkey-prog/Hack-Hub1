@@ -374,6 +374,254 @@ Players.PlayerRemoving:Connect(RemoveESP)
 -- Update loop
 RunService.RenderStepped:Connect(UpdateESP)
 
+-- Advanced Aimbot System
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Aimbot Configuration
+local AimbotSettings = {
+    Enabled = false,        -- Toggle state
+    TargetPart = "Head",    -- Body part to target
+    TeamCheck = true,       -- Skip teammates
+    VisibilityCheck = true, -- Check if target is visible
+    MaxDistance = 1000,     -- Maximum targeting distance 
+    Sensitivity = 0.5,      -- Lower = smoother aimbot (0.1 to 1)
+    FOVRadius = 400,        -- Field of view circle size
+    ShowFOV = true,         -- Show FOV circle
+    AimKey = Enum.UserInputType.MouseButton2,  -- Right mouse button
+    IgnorePlayers = {}      -- List of players to ignore
+}
+
+-- Drawing objects
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.7
+FOVCircle.NumSides = 64
+FOVCircle.Radius = AimbotSettings.FOVRadius
+FOVCircle.Visible = false
+
+-- Variables
+local IsAiming = false
+local ClosestPlayer = nil
+local ClosestDistance = math.huge
+
+-- Function to check if a point is visible
+local function IsVisible(Position, Target)
+    if not AimbotSettings.VisibilityCheck then return true end
+    
+    local Origin = Camera.CFrame.Position
+    local Direction = (Position - Origin).Unit * AimbotSettings.MaxDistance
+    
+    local RaycastParams = RaycastParams.new()
+    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    RaycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Target}
+    
+    local Result = workspace:Raycast(Origin, Direction, RaycastParams)
+    return Result == nil
+end
+
+-- Function to get closest player within FOV
+local function GetClosestPlayerInFOV()
+    ClosestDistance = AimbotSettings.FOVRadius
+    ClosestPlayer = nil
+    
+    local MousePosition = UserInputService:GetMouseLocation()
+    
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player == LocalPlayer then continue end
+        if table.find(AimbotSettings.IgnorePlayers, Player.Name) then continue end
+        
+        -- Team check
+        if AimbotSettings.TeamCheck and Player.Team == LocalPlayer.Team then continue end
+        
+        -- Character checks
+        if not Player.Character or not Player.Character:FindFirstChild("Humanoid") then continue end
+        if Player.Character.Humanoid.Health <= 0 then continue end
+        
+        -- Target part check
+        local TargetPart = Player.Character:FindFirstChild(AimbotSettings.TargetPart)
+        if not TargetPart then continue end
+        
+        -- Distance check
+        local Distance = (TargetPart.Position - Camera.CFrame.Position).Magnitude
+        if Distance > AimbotSettings.MaxDistance then continue end
+        
+        -- Visibility check
+        if not IsVisible(TargetPart.Position, Player.Character) then continue end
+        
+        -- Screen position check
+        local ScreenPosition, OnScreen = Camera:WorldToViewportPoint(TargetPart.Position)
+        if not OnScreen then continue end
+        
+        -- FOV check
+        local ScreenDistance = (MousePosition - Vector2.new(ScreenPosition.X, ScreenPosition.Y)).Magnitude
+        if ScreenDistance > AimbotSettings.FOVRadius then continue end
+        
+        -- Check if this player is closer than the current closest
+        if ScreenDistance < ClosestDistance then
+            ClosestDistance = ScreenDistance
+            ClosestPlayer = Player
+        end
+    end
+    
+    return ClosestPlayer
+end
+
+-- Function to aim at a target
+local function AimAt(Target)
+    if not Target or not Target.Character or not Target.Character:FindFirstChild(AimbotSettings.TargetPart) then return end
+    
+    local TargetPart = Target.Character:FindFirstChild(AimbotSettings.TargetPart)
+    local TargetPosition = TargetPart.Position
+    
+    -- Add prediction for moving targets (basic)
+    if Target.Character:FindFirstChild("Humanoid") and Target.Character.Humanoid.MoveDirection.Magnitude > 0 then
+        local Velocity = Target.Character.HumanoidRootPart.Velocity
+        TargetPosition = TargetPosition + (Velocity * 0.05) -- Basic prediction factor
+    end
+    
+    -- Calculate the direction
+    local TargetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPosition)
+    
+    -- Smoothly interpolate camera rotation
+    local LerpFactor = AimbotSettings.Sensitivity
+    Camera.CFrame = Camera.CFrame:Lerp(TargetCFrame, LerpFactor)
+end
+
+-- Toggle the aimbot
+local function ToggleAimbot(Value)
+    AimbotSettings.Enabled = Value
+    
+    -- Update FOV circle
+    FOVCircle.Visible = Value and AimbotSettings.ShowFOV
+    
+    -- Notification
+    Rayfield:Notify({
+        Title = "Aimbot " .. (Value and "Enabled" or "Disabled"),
+        Content = "Aimbot is now " .. (Value and "ON" or "OFF"),
+        Duration = 3,
+        Image = nil,
+    })
+end
+
+-- Update FOV circle position
+RunService.RenderStepped:Connect(function()
+    -- Update FOV circle
+    if AimbotSettings.ShowFOV and AimbotSettings.Enabled then
+        FOVCircle.Position = UserInputService:GetMouseLocation()
+        FOVCircle.Radius = AimbotSettings.FOVRadius
+        FOVCircle.Visible = true
+    else
+        FOVCircle.Visible = false
+    end
+    
+    -- Handle aimbot logic
+    if AimbotSettings.Enabled and IsAiming then
+        local Target = GetClosestPlayerInFOV()
+        if Target then
+            AimAt(Target)
+        end
+    end
+end)
+
+-- Input handling for aim key
+UserInputService.InputBegan:Connect(function(Input)
+    if Input.UserInputType == AimbotSettings.AimKey then
+        IsAiming = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(Input)
+    if Input.UserInputType == AimbotSettings.AimKey then
+        IsAiming = false
+    end
+end)
+
+-- Create the aimbot toggle in the MainTab
+local AimbotToggle = MainTab:CreateToggle({
+    Name = "Toggle Aimbot",
+    CurrentValue = false,
+    Flag = "ToggleAimbot", 
+    Callback = function(Value)
+        ToggleAimbot(Value)
+    end,
+})
+
+-- Add sensitivity slider
+local SensitivitySlider = MainTab:CreateSlider({
+    Name = "Aimbot Smoothness",
+    Range = {0.1, 1},
+    Increment = 0.05,
+    Suffix = "x",
+    CurrentValue = 0.5,
+    Flag = "AimbotSensitivity",
+    Callback = function(Value)
+        AimbotSettings.Sensitivity = Value
+    end,
+})
+
+-- Add FOV radius slider
+local FOVRadiusSlider = MainTab:CreateSlider({
+    Name = "FOV Radius",
+    Range = {50, 800},
+    Increment = 25,
+    Suffix = "px",
+    CurrentValue = 400,
+    Flag = "AimbotFOVRadius",
+    Callback = function(Value)
+        AimbotSettings.FOVRadius = Value
+    end,
+})
+
+-- FOV Circle visibility toggle
+local FOVCircleToggle = MainTab:CreateToggle({
+    Name = "Show FOV Circle",
+    CurrentValue = true,
+    Flag = "ShowFOVCircle",
+    Callback = function(Value)
+        AimbotSettings.ShowFOV = Value
+    end,
+})
+
+-- Team check toggle
+local TeamCheckToggle = MainTab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = true,
+    Flag = "TeamCheck",
+    Callback = function(Value)
+        AimbotSettings.TeamCheck = Value
+    end,
+})
+
+-- Target part dropdown
+local TargetPartDropdown = MainTab:CreateDropdown({
+    Name = "Target Part",
+    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
+    CurrentOption = "Head",
+    Flag = "TargetPart",
+    Callback = function(Option)
+        AimbotSettings.TargetPart = Option
+    end,
+})
+
+-- Keybind for aimbot activation key
+MainTab:CreateKeybind({
+    Name = "Aim Key",
+    CurrentKeybind = "MouseButton2",
+    HoldToInteract = false,
+    Flag = "AimbotKey",
+    Callback = function(Keybind)
+        if typeof(Keybind) == "EnumItem" then
+            AimbotSettings.AimKey = Keybind
+        end
+    end,
+})
+
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
