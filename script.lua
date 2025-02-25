@@ -1184,9 +1184,6 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end
             end
             
-            -- Simulate gravity
-            local gravity = Vector3.new(0, -10, 0)
-            
             -- Use TweenService for smooth movement
             local tweenInfo = TweenInfo.new(
                 (targetPosition - rootPart.Position).Magnitude / moveSpeed, -- Time based on distance and speed
@@ -1203,6 +1200,14 @@ local Dropdown = TeleportTab:CreateDropdown({
                         part.CanCollide = true
                     end
                 end
+
+                -- Final position adjustment
+                rootPart.CFrame = CFrame.new(targetPosition) * CFrame.new(0, 5, 0) -- Slightly above the target position
+                task.wait(0.1) -- Short delay to stabilize
+                rootPart.CFrame = CFrame.new(targetPosition) -- Move to the exact position
+
+                -- Reset humanoid state
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
             end)
         else
             warn("Invalid teleport location selected: " .. selectedLocation)
