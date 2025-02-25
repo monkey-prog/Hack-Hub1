@@ -1168,30 +1168,87 @@ local Dropdown = TeleportTab:CreateDropdown({
            local humanoid = character:WaitForChild("Humanoid")
            local rootPart = character:WaitForChild("HumanoidRootPart")
            
-           -- Get current properties
-           local currentWalkSpeed = humanoid.WalkSpeed
-           local currentPosition = rootPart.Position
+           -- Store original properties
+           local originalWalkSpeed = humanoid.WalkSpeed
+           local originalCollisionState = {}
            
-           -- Calculate direction vector
-           local direction = (targetPosition - currentPosition).Unit
+           -- Safe speed that won't trigger anti-cheat (adjust if needed)
+           local safeSpeed = 60
            
-           -- Disable character control temporarily
+           -- Disable collisions for all parts (no-clip)
+           for _, part in pairs(character:GetDescendants()) do
+               if part:IsA("BasePart") then
+                   originalCollisionState[part] = part.CanCollide
+                   part.CanCollide = false
+               end
+           end
+           
+           -- Disable character control
            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
            
+           -- Create a BodyVelocity to control movement
+           local bodyVelocity = Instance.new("BodyVelocity")
+           bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+           bodyVelocity.P = 1250
+           bodyVelocity.Parent = rootPart
+           
+           -- Function to clean up and restore original state
+           local function cleanUp()
+               -- Remove body velocity
+               if bodyVelocity and bodyVelocity.Parent then
+                   bodyVelocity:Destroy()
+               end
+               
+               -- Restore collision states
+               for part, state in pairs(originalCollisionState) do
+                   if part and part:IsA("BasePart") then
+                       part.CanCollide = state
+                   end
+               end
+               
+               -- Restore character control
+               humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+           end
+           
            -- Start flying towards the target
+           local startTime = tick()
            local flightConnection
            flightConnection = game:GetService("RunService").Heartbeat:Connect(function()
-               local distanceToTarget = (targetPosition - rootPart.Position).Magnitude
+               -- Check if character still exists
+               if not character:IsDescendantOf(game) or not rootPart:IsDescendantOf(character) then
+                   flightConnection:Disconnect()
+                   cleanUp()
+                   return
+               end
+               
+               local currentPosition = rootPart.Position
+               local distanceToTarget = (targetPosition - currentPosition).Magnitude
+               
+               -- Calculate direction to target
+               local direction = (targetPosition - currentPosition).Unit
                
                if distanceToTarget > 5 then
-                   -- Apply velocity in the direction of the target at the character's walk speed
-                   rootPart.Velocity = direction * currentWalkSpeed
+                   -- Move towards target
+                   bodyVelocity.Velocity = direction * safeSpeed
                else
                    -- We've reached the destination
                    flightConnection:Disconnect()
-                   humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-                   rootPart.Velocity = Vector3.new(0, 0, 0)
+                   
+                   -- Final position adjustment
                    rootPart.CFrame = CFrame.new(targetPosition)
+                   bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                   
+                   -- Clean up and restore original state
+                   cleanUp()
+               end
+           end)
+           
+           -- Safety disconnect after 60 seconds (in case something goes wrong)
+           task.delay(60, function()
+               if flightConnection.Connected then
+                   flightConnection:Disconnect()
+                   cleanUp()
+                   warn("Teleport timed out after 60 seconds")
                end
            end)
        else
