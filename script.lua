@@ -44,579 +44,1195 @@ Rayfield:Notify({
    Image = nil,
 })
 
--- Xeno ESP Script (Now With Movable Mini Radar)
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-local UserInputService = game:GetService("UserInputService")
+local Button = MainTab:CreateButton({
+   Name = "Role ESP",
+   Callback = function()
+-- Roblox Role-Based ESP Script
+-- Shows players with customizable ESP features based on leaderboard roles
+-- Different colored lines for Police, EMS, Prisoner, and Neutral roles
 
--- Table to store ESP & radar data
-local ESP_Objects = {}
-local ESPEnabled = false -- Flag to track if ESP is enabled
-
--- Radar Settings
-local RadarSize = 150 -- Size of the radar (square)
-local RadarScale = 3 -- Scaling factor for distance visualization
-local RadarPosition = Vector2.new(30, 30) -- Position (movable)
-local DraggingRadar = false
-local DragOffset = Vector2.new(0, 0)
-
--- Team colors for ESP and radar
-local TeamColors = {
-    ["Police"] = Color3.fromRGB(0, 0, 255), -- Blue
-    ["Prisoner"] = Color3.fromRGB(255, 165, 0), -- Orange
-    ["EMS"] = Color3.fromRGB(255, 0, 0), -- Red
-    ["Neutral"] = Color3.fromRGB(128, 128, 128) -- Gray
+local ESPSettings = {
+    Enabled = true,
+    BoxesEnabled = true,
+    BoxColor = Color3.fromRGB(255, 0, 0), -- Default red boxes
+    LinesEnabled = true,
+    TextEnabled = true,
+    TextColor = Color3.fromRGB(255, 255, 255), -- White text
+    TextSize = 14,
+    MaxDistance = 1000, -- Maximum distance to render ESP
+    FilterNonPlayerObjects = true, -- Prevents highlighting non-player objects
+    FilterGUIElements = true, -- Prevents highlighting GUI elements
+    
+    -- Role-specific colors
+    RoleColors = {
+        ["Police"] = Color3.fromRGB(0, 0, 255),     -- Blue for Police
+        ["EMS"] = Color3.fromRGB(255, 0, 0),        -- Red for EMS
+        ["Prisoner"] = Color3.fromRGB(255, 165, 0), -- Orange for Prisoner
+        ["Neutral"] = Color3.fromRGB(128, 128, 128) -- Gray for Neutral
+    }
 }
 
--- Create Radar Base
-local RadarFrame = Drawing.new("Square")
-RadarFrame.Size = Vector2.new(RadarSize, RadarSize)
-RadarFrame.Position = RadarPosition
-RadarFrame.Color = Color3.fromRGB(255, 255, 255) -- White border
-RadarFrame.Thickness = 2
-RadarFrame.Filled = false
-RadarFrame.Transparency = 1
-RadarFrame.Visible = false -- Initially hidden until enabled
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
--- Create Radar Center Dot (Your Position)
-local RadarCenter = Drawing.new("Circle")
-RadarCenter.Position = RadarPosition + Vector2.new(RadarSize / 2, RadarSize / 2)
-RadarCenter.Radius = 3
-RadarCenter.Color = Color3.fromRGB(0, 255, 0) -- Green for local player
-RadarCenter.Filled = true
-RadarCenter.Transparency = 1
-RadarCenter.Visible = false -- Initially hidden until enabled
+-- Variables
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local ESPFolder
+local SettingsGui
 
--- Function to create ESP
-local function CreateESP(Player)
-    if Player == LocalPlayer then return end -- Skip local player
+-- Create ESP container
+local function CreateESPFolder()
+    if CoreGui:FindFirstChild("ESPFolder") then
+        CoreGui.ESPFolder:Destroy()
+    end
+    ESPFolder = Instance.new("Folder")
+    ESPFolder.Name = "ESPFolder"
+    ESPFolder.Parent = CoreGui
+end
 
-    local function UpdatePlayerESP()
-        if not Player.Character or not Player.Character:FindFirstChild("HumanoidRootPart") then return end
-        
-        local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
-        local Humanoid = Player.Character:FindFirstChild("Humanoid")
-        
-        -- Skip if humanoid doesn't exist
-        if not Humanoid then return end
-        
-        local oldTeam = ESP_Objects[Player] and ESP_Objects[Player].Team or nil
-        local Team = Player.Team and Player.Team.Name or "Neutral"
-        local LineColor = TeamColors[Team] or Color3.fromRGB(255, 255, 255) -- Default white
-        local BoxColor = Color3.fromRGB(255, 0, 0) -- Red boxes for everyone
+-- Utility function to create drawing objects
+local function CreateDrawing(type, properties)
+    local drawing = Drawing.new(type)
+    for property, value in pairs(properties) do
+        drawing[property] = value
+    end
+    return drawing
+end
 
-        -- Check if team changed
-        if oldTeam and oldTeam ~= Team then
-            Rayfield:Notify({
-                Title = "Team Changed",
-                Content = Player.DisplayName .. " changed from " .. oldTeam .. " to " .. Team,
-                Duration = 6.5,
-                Image = nil,
-            })
+-- Function to get character parts
+local function GetCharacterParts(character)
+    if not character then return nil end
+    
+    local parts = {}
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            parts[#parts + 1] = part
         end
+    end
+    
+    return parts
+end
 
-        -- Remove old ESP if exists
-        if ESP_Objects[Player] then
-            ESP_Objects[Player].Box:Remove()
-            ESP_Objects[Player].Line:Remove()
-            ESP_Objects[Player].Text:Remove()
-            ESP_Objects[Player].RadarDot:Remove()
+-- Validate if object is a valid player character
+local function IsValidCharacter(object)
+    if not object then return false end
+    
+    -- Verify it's a character model with required components
+    if not object:IsA("Model") then return false end
+    if not object:FindFirstChild("Humanoid") then return false end
+    if not object:FindFirstChild("HumanoidRootPart") then return false end
+    
+    -- Check if it belongs to a player
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character == object then
+            return true
         end
+    end
+    
+    return false
+end
 
-        -- Create new ESP elements
-        local Box = Drawing.new("Square")
-        Box.Thickness = 2
-        Box.Color = BoxColor
-        Box.Filled = false
-        Box.Transparency = 1
-        Box.Visible = false
+-- Function to determine a player's role from the leaderboard
+local function GetPlayerRole(player)
+    -- Default role is Neutral
+    local role = "Neutral"
+    
+    -- Look for role indicators in the player's leaderstats
+    if player:FindFirstChild("leaderstats") then
+        local leaderstats = player.leaderstats
+        
+        -- Check for various role indicators (might need adjustment for specific games)
+        for _, child in pairs(leaderstats:GetChildren()) do
+            local value = child.Value
+            if typeof(value) == "string" then
+                if value:find("Police") then
+                    return "Police"
+                elseif value:find("EMS") then
+                    return "EMS"
+                elseif value:find("Prisoner") then
+                    return "Prisoner"
+                end
+            end
+        end
+    end
+    
+    -- Check for team-based roles
+    if player.Team then
+        local teamName = player.Team.Name
+        if teamName:find("Police") then
+            return "Police"
+        elseif teamName:find("EMS") or teamName:find("Medic") or teamName:find("Doctor") then
+            return "EMS"
+        elseif teamName:find("Prisoner") or teamName:find("Criminal") or teamName:find("Inmate") then
+            return "Prisoner"
+        end
+    end
+    
+    -- Check for specific team colors that might indicate roles
+    if player.TeamColor then
+        if player.TeamColor == BrickColor.new("Bright blue") then
+            return "Police"
+        elseif player.TeamColor == BrickColor.new("Really red") then
+            return "EMS"
+        elseif player.TeamColor == BrickColor.new("Bright orange") then
+            return "Prisoner"
+        end
+    end
+    
+    return role
+end
 
-        local Line = Drawing.new("Line")
-        Line.Thickness = 1.5
-        Line.Color = LineColor
-        Line.Transparency = 1
-        Line.Visible = false
-
-        local Text = Drawing.new("Text")
-        Text.Size = 14
-        Text.Color = Color3.fromRGB(255, 255, 255) -- White text
-        Text.Center = true
-        Text.Outline = true
-        Text.OutlineColor = Color3.fromRGB(0, 0, 0) -- Black outline for better visibility
-        Text.Transparency = 1
-        Text.Visible = false
-
-        local RadarDot = Drawing.new("Circle")
-        RadarDot.Radius = 3
-        RadarDot.Color = LineColor
-        RadarDot.Filled = true
-        RadarDot.Transparency = 1
-        RadarDot.Visible = false
-
-        ESP_Objects[Player] = { 
-            Box = Box, 
-            Line = Line, 
-            Text = Text, 
-            RadarDot = RadarDot, 
-            HRP = HRP, 
-            Humanoid = Humanoid,
-            Team = Team,
-            IsAlive = true -- Track if player is alive
+-- Calculate 3D bounding box corners
+local function CalculateCorners(character)
+    local parts = GetCharacterParts(character)
+    if not parts or #parts == 0 then return nil end
+    
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    
+    for _, part in pairs(parts) do
+        local size = part.Size
+        local cf = part.CFrame
+        
+        local corners = {
+            cf * CFrame.new(size.X/2, size.Y/2, size.Z/2),
+            cf * CFrame.new(-size.X/2, size.Y/2, size.Z/2),
+            cf * CFrame.new(size.X/2, -size.Y/2, size.Z/2),
+            cf * CFrame.new(-size.X/2, -size.Y/2, size.Z/2),
+            cf * CFrame.new(size.X/2, size.Y/2, -size.Z/2),
+            cf * CFrame.new(-size.X/2, size.Y/2, -size.Z/2),
+            cf * CFrame.new(size.X/2, -size.Y/2, -size.Z/2),
+            cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)
         }
         
-        -- Connect to humanoid events to track life state
-        Humanoid.Died:Connect(function()
-            if ESP_Objects[Player] then
-                ESP_Objects[Player].IsAlive = false
-            end
+        for _, corner in pairs(corners) do
+            local position = corner.Position
+            minX, minY, minZ = math.min(minX, position.X), math.min(minY, position.Y), math.min(minZ, position.Z)
+            maxX, maxY, maxZ = math.max(maxX, position.X), math.max(maxY, position.Y), math.max(maxZ, position.Z)
+        end
+    end
+    
+    return {
+        BottomCorner = Vector3.new(minX, minY, minZ),
+        TopCorner = Vector3.new(maxX, maxY, maxZ)
+    }
+end
+
+-- ESP class for each player
+local ESP = {}
+ESP.__index = ESP
+
+function ESP.new(player)
+    local self = setmetatable({}, ESP)
+    
+    self.Player = player
+    self.Role = GetPlayerRole(player)
+    
+    -- Create ESP objects immediately
+    self.BoxDrawing = CreateDrawing("Square", {
+        Thickness = 2,
+        Color = ESPSettings.BoxColor,
+        Filled = false,
+        Visible = false,
+        ZIndex = 2
+    })
+    self.LineDrawing = CreateDrawing("Line", {
+        Thickness = 1,
+        Color = ESPSettings.RoleColors[self.Role],
+        Visible = false,
+        ZIndex = 1
+    })
+    self.TextDrawing = CreateDrawing("Text", {
+        Text = "",
+        Size = ESPSettings.TextSize,
+        Center = true,
+        Outline = true,
+        Color = ESPSettings.TextColor,
+        Visible = false,
+        ZIndex = 3
+    })
+    
+    -- Initialize character
+    if player.Character then
+        self.Character = player.Character
+        -- Force an immediate update
+        task.spawn(function()
+            self:Update()
         end)
     end
-
-    -- Initial ESP creation
-    UpdatePlayerESP()
     
-    -- Notify for new player
-    Rayfield:Notify({
-        Title = "Player Joined",
-        Content = Player.DisplayName .. " added to ESP",
-        Duration = 6.5,
-        Image = nil,
-    })
-
-    -- Update ESP when the player switches teams
-    Player:GetPropertyChangedSignal("Team"):Connect(UpdatePlayerESP)
+    -- Handle character respawning with immediate update
+    player.CharacterAdded:Connect(function(character)
+        self.Character = character
+        -- Force an immediate update when character loads
+        task.spawn(function()
+            self:Update()
+        end)
+    end)
     
-    -- Update ESP when character changes (respawn)
-    Player.CharacterAdded:Connect(function(Character)
-        -- Wait a moment for the character to fully load
-        task.wait(0.5)
-        UpdatePlayerESP()
+    -- Update role when player data changes
+    player.Changed:Connect(function()
+        local newRole = GetPlayerRole(player)
+        if self.Role ~= newRole then
+            self.Role = newRole
+            self.LineDrawing.Color = ESPSettings.RoleColors[self.Role]
+        end
+    end)
+    
+    -- Listen for team changes
+    player:GetPropertyChangedSignal("Team"):Connect(function()
+        local newRole = GetPlayerRole(player)
+        if self.Role ~= newRole then
+            self.Role = newRole
+            self.LineDrawing.Color = ESPSettings.RoleColors[self.Role]
+        end
+    end)
+    
+    return self
+end
+
+function ESP:Update()
+    if not ESPSettings.Enabled then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Extra validation to ensure we only highlight actual player characters
+    if not self.Character or not self.Player or not self.Character:FindFirstChild("HumanoidRootPart") or not self.Character:FindFirstChild("Humanoid") then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Additional check to ensure the character is valid
+    if ESPSettings.FilterNonPlayerObjects and not IsValidCharacter(self.Character) then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Get player data
+    local humanoidRootPart = self.Character.HumanoidRootPart
+    local humanoid = self.Character.Humanoid
+    local position = humanoidRootPart.Position
+    local distance = (Camera.CFrame.Position - position).Magnitude
+    
+    -- Check distance
+    if distance > ESPSettings.MaxDistance then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Get bounding box
+    local corners = CalculateCorners(self.Character)
+    if not corners then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Additional size sanity check to avoid large boxes around non-character objects
+    local boxWidth = math.abs(corners.TopCorner.X - corners.BottomCorner.X)
+    local boxHeight = math.abs(corners.TopCorner.Y - corners.BottomCorner.Y)
+    
+    if boxWidth > 50 or boxHeight > 50 then
+        self.BoxDrawing.Visible = false
+        self.LineDrawing.Visible = false
+        self.TextDrawing.Visible = false
+        return
+    end
+    
+    -- Box ESP
+    if ESPSettings.BoxesEnabled then
+        local bottomCorner = Camera:WorldToViewportPoint(corners.BottomCorner)
+        local topCorner = Camera:WorldToViewportPoint(corners.TopCorner)
         
-        -- Reset alive status when player respawns
-        if ESP_Objects[Player] then
-            ESP_Objects[Player].IsAlive = true
+        if bottomCorner.Z > 0 and topCorner.Z > 0 then
+            local width = math.abs(topCorner.X - bottomCorner.X)
+            local height = math.abs(topCorner.Y - bottomCorner.Y)
+            
+            -- Additional size validation to prevent large boxes
+            if width < 2000 and height < 2000 and width > 5 and height > 5 then
+                self.BoxDrawing.Size = Vector2.new(width, height)
+                self.BoxDrawing.Position = Vector2.new(
+                    math.min(bottomCorner.X, topCorner.X),
+                    math.min(bottomCorner.Y, topCorner.Y)
+                )
+                -- Use role-based colors for boxes too
+                self.BoxDrawing.Color = ESPSettings.RoleColors[self.Role]
+                self.BoxDrawing.Visible = true
+            else
+                self.BoxDrawing.Visible = false
+            end
+        else
+            self.BoxDrawing.Visible = false
+        end
+    else
+        self.BoxDrawing.Visible = false
+    end
+    
+    -- Line ESP - now using role-based colors
+    if ESPSettings.LinesEnabled then
+        local headPosition = Camera:WorldToViewportPoint(humanoidRootPart.Position + Vector3.new(0, 3, 0))
+        
+        if headPosition.Z > 0 then
+            self.LineDrawing.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            self.LineDrawing.To = Vector2.new(headPosition.X, headPosition.Y)
+            self.LineDrawing.Color = ESPSettings.RoleColors[self.Role]
+            self.LineDrawing.Visible = true
+        else
+            self.LineDrawing.Visible = false
+        end
+    else
+        self.LineDrawing.Visible = false
+    end
+    
+    -- Text ESP (distance, name, health, and role)
+    if ESPSettings.TextEnabled then
+        local headPosition = Camera:WorldToViewportPoint(humanoidRootPart.Position + Vector3.new(0, 3, 0))
+        
+        if headPosition.Z > 0 then
+            local roundedDistance = math.floor(distance + 0.5)
+            local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100 + 0.5)
+            
+            self.TextDrawing.Text = string.format("%s|%dm|%s|%d%%", self.Role, roundedDistance, self.Player.Name, healthPercent)
+            self.TextDrawing.Position = Vector2.new(headPosition.X, headPosition.Y - 30)
+            self.TextDrawing.Color = ESPSettings.TextColor
+            self.TextDrawing.Size = ESPSettings.TextSize
+            self.TextDrawing.Visible = true
+        else
+            self.TextDrawing.Visible = false
+        end
+    else
+        self.TextDrawing.Visible = false
+    end
+end
+
+function ESP:Remove()
+    self.BoxDrawing:Remove()
+    self.LineDrawing:Remove()
+    self.TextDrawing:Remove()
+end
+
+-- Main ESP manager
+local ESPManager = {
+    Players = {},
+    Connections = {}
+}
+
+function ESPManager:Start()
+    CreateESPFolder()
+    
+    -- Add existing players
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            self.Players[player] = ESP.new(player)
+        end
+    end
+    
+    -- Handle new players joining
+    table.insert(self.Connections, Players.PlayerAdded:Connect(function(player)
+        if player ~= LocalPlayer then
+            -- Create new ESP instance
+            self.Players[player] = ESP.new(player)
+            
+            -- Notify about new player
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "ESP",
+                Text = player.Name .. " joined as " .. GetPlayerRole(player),
+                Duration = 2
+            })
+        end
+    end))
+    
+    -- Handle players leaving
+    table.insert(self.Connections, Players.PlayerRemoving:Connect(function(player)
+        if self.Players[player] then
+            self.Players[player]:Remove()
+            self.Players[player] = nil
+        end
+    end))
+    
+    -- Update ESP
+    table.insert(self.Connections, RunService.RenderStepped:Connect(function()
+        for _, esp in pairs(self.Players) do
+            esp:Update()
+        end
+    end))
+    
+    -- Create settings GUI
+    self:CreateSettingsGUI()
+end
+
+function ESPManager:Stop()
+    -- Disconnect all connections
+    for _, connection in pairs(self.Connections) do
+        connection:Disconnect()
+    end
+    self.Connections = {}
+    
+    -- Remove all ESP objects
+    for _, esp in pairs(self.Players) do
+        esp:Remove()
+    end
+    self.Players = {}
+    
+    -- Remove ESP folder
+    if ESPFolder then
+        ESPFolder:Destroy()
+    end
+    
+    -- Remove GUI
+    if SettingsGui then
+        SettingsGui:Destroy()
+        SettingsGui = nil
+    end
+end
+
+function ESPManager:ToggleGUI()
+    if SettingsGui then
+        -- If GUI exists, just show it instead of creating a new one
+        SettingsGui.Enabled = true
+        return
+    end
+    self:CreateSettingsGUI()
+end
+
+function ESPManager:UpdateAllButtons()
+    -- This function updates all button appearances based on current settings
+    if not SettingsGui then return end
+    
+    -- Find and update all toggle buttons
+    for _, button in pairs(SettingsGui:GetDescendants()) do
+        if button:IsA("TextButton") then
+            local buttonText = button.Text
+            -- Skip the X button and role color buttons
+            if buttonText ~= "X" and not buttonText:find("Color") then
+                local settingName = buttonText:split(":")[1]:gsub(" ", "")
+                
+                -- Map button text to setting names
+                local settingMap = {
+                    ["ESP"] = "Enabled",
+                    ["Boxes"] = "BoxesEnabled",
+                    ["Lines"] = "LinesEnabled",
+                    ["TextInfo"] = "TextEnabled"
+                }
+                
+                if settingMap[settingName] then
+                    local isOn = ESPSettings[settingMap[settingName]]
+                    button.Text = settingName .. ": " .. (isOn and "ON" or "OFF")
+                    button.BackgroundColor3 = isOn and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+                    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+                end
+            end
+        end
+    end
+end
+
+function ESPManager:CreateSettingsGUI()
+    -- Check if GUI already exists, if so just show it
+    if SettingsGui then
+        SettingsGui.Enabled = true
+        return
+    end
+    
+    -- Create the ScreenGui with proper ZIndexBehavior
+    SettingsGui = Instance.new("ScreenGui")
+    SettingsGui.Name = "ESPSettings"
+    SettingsGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    SettingsGui.Parent = CoreGui
+    SettingsGui.ResetOnSpawn = false
+    
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(0, 200, 0, 330)
+    Frame.Position = UDim2.new(0, 10, 0, 10)
+    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Frame.BorderSizePixel = 0
+    Frame.Active = true
+    Frame.Draggable = true
+    Frame.Parent = SettingsGui
+    
+    -- Title with black background
+    local TitleFrame = Instance.new("Frame")
+    TitleFrame.Size = UDim2.new(1, 0, 0, 40)
+    TitleFrame.Position = UDim2.new(0, 0, 0, 0)
+    TitleFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    TitleFrame.BorderSizePixel = 0
+    TitleFrame.Parent = Frame
+    
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, -25, 1, 0)
+    Title.Position = UDim2.new(0, 10, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextSize = 18
+    Title.Font = Enum.Font.SourceSansBold
+    Title.Text = "Role ESP Settings"
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.TextYAlignment = Enum.TextYAlignment.Center
+    Title.Parent = TitleFrame
+    
+    -- Add X button
+    local XButton = Instance.new("TextButton")
+    XButton.Size = UDim2.new(0, 25, 0, 25)
+    XButton.Position = UDim2.new(1, -25, 0, 8)
+    XButton.BackgroundTransparency = 1
+    XButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    XButton.TextSize = 18
+    XButton.Font = Enum.Font.SourceSansBold
+    XButton.Text = "X"
+    XButton.TextYAlignment = Enum.TextYAlignment.Center
+    XButton.Parent = TitleFrame
+    
+    -- Add X button functionality - now just hides the GUI instead of destroying
+    XButton.MouseButton1Click:Connect(function()
+        SettingsGui.Enabled = false
+    end)
+    
+    local function createButton(text, position, isOn, callback)
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.new(1, 0, 0, 30)
+        button.Position = position
+        button.Font = Enum.Font.SourceSansBold
+        button.TextSize = 16
+        button.Text = text
+        button.Parent = Frame
+        
+        -- Update appearance based on state
+        local function updateAppearance()
+            if text:find("Police Color") then
+                button.BackgroundColor3 = ESPSettings.RoleColors["Police"]
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif text:find("EMS Color") then
+                button.BackgroundColor3 = ESPSettings.RoleColors["EMS"]
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif text:find("Prisoner Color") then
+                button.BackgroundColor3 = ESPSettings.RoleColors["Prisoner"]
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif text:find("Neutral Color") then
+                button.BackgroundColor3 = ESPSettings.RoleColors["Neutral"]
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                button.BackgroundColor3 = isOn and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            end
+        end
+        
+        updateAppearance()
+        
+        button.MouseButton1Click:Connect(function()
+            if callback then
+                if text:find("Color") then
+                    -- For color buttons, cycle through some preset colors
+                    callback()
+                else
+                    -- Toggle button state and update ESPSettings
+                    isOn = not isOn
+                    button.Text = text:split(":")[1] .. ": " .. (isOn and "ON" or "OFF")
+                    callback(isOn)
+                    
+                    -- Apply notification when main ESP toggle changes
+                    if text:find("ESP:") then
+                        game:GetService("StarterGui"):SetCore("SendNotification", {
+                            Title = "Role ESP",
+                            Text = isOn and "Enabled" or "Disabled",
+                            Duration = 2
+                        })
+                    end
+                end
+                
+                updateAppearance()
+                -- Update all buttons to ensure UI consistency
+                ESPManager:UpdateAllButtons()
+            end
+        end)
+        
+        return button
+    end
+    
+    -- Adjust button spacing for compact layout
+    local buttonHeight = 30
+    local buttonSpacing = 5
+    local currentY = 45
+    
+    -- Create buttons with even spacing
+    local espButton = createButton("ESP: " .. (ESPSettings.Enabled and "ON" or "OFF"), 
+        UDim2.new(0, 0, 0, currentY), ESPSettings.Enabled, 
+        function(value) 
+            ESPSettings.Enabled = value 
+        end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local boxesButton = createButton("Boxes: " .. (ESPSettings.BoxesEnabled and "ON" or "OFF"), 
+        UDim2.new(0, 0, 0, currentY), ESPSettings.BoxesEnabled, 
+        function(value) 
+            ESPSettings.BoxesEnabled = value 
+        end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local linesButton = createButton("Lines: " .. (ESPSettings.LinesEnabled and "ON" or "OFF"), 
+        UDim2.new(0, 0, 0, currentY), ESPSettings.LinesEnabled, 
+        function(value) 
+            ESPSettings.LinesEnabled = value 
+        end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local textButton = createButton("Text Info: " .. (ESPSettings.TextEnabled and "ON" or "OFF"), 
+        UDim2.new(0, 0, 0, currentY), ESPSettings.TextEnabled, 
+        function(value) 
+            ESPSettings.TextEnabled = value 
+        end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    -- Add role color settings
+    local policeColorButton = createButton("Police Color", UDim2.new(0, 0, 0, currentY), true, function()
+        -- Cycle through blue shades
+        local currentColor = ESPSettings.RoleColors["Police"]
+        local blueShades = {
+            Color3.fromRGB(0, 0, 255),      -- Bright blue
+            Color3.fromRGB(0, 0, 200),      -- Medium blue
+            Color3.fromRGB(0, 0, 150),      -- Darker blue
+            Color3.fromRGB(30, 144, 255)    -- Dodger blue
+        }
+        
+        for i, color in ipairs(blueShades) do
+            if currentColor == color and i < #blueShades then
+                ESPSettings.RoleColors["Police"] = blueShades[i + 1]
+                break
+            elseif i == #blueShades or currentColor ~= color then
+                ESPSettings.RoleColors["Police"] = blueShades[1]
+                break
+            end
+        end
+    end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local emsColorButton = createButton("EMS Color", UDim2.new(0, 0, 0, currentY), true, function()
+        -- Cycle through red shades
+        local currentColor = ESPSettings.RoleColors["EMS"]
+        local redShades = {
+            Color3.fromRGB(255, 0, 0),      -- Bright red
+            Color3.fromRGB(200, 0, 0),      -- Medium red
+            Color3.fromRGB(150, 0, 0),      -- Darker red
+            Color3.fromRGB(220, 20, 60)     -- Crimson
+        }
+        
+        for i, color in ipairs(redShades) do
+            if currentColor == color and i < #redShades then
+                ESPSettings.RoleColors["EMS"] = redShades[i + 1]
+                break
+            elseif i == #redShades or currentColor ~= color then
+                ESPSettings.RoleColors["EMS"] = redShades[1]
+                break
+            end
+        end
+    end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local prisonerColorButton = createButton("Prisoner Color", UDim2.new(0, 0, 0, currentY), true, function()
+        -- Cycle through orange shades
+        local currentColor = ESPSettings.RoleColors["Prisoner"]
+        local orangeShades = {
+            Color3.fromRGB(255, 165, 0),    -- Orange
+            Color3.fromRGB(255, 140, 0),    -- Dark orange
+            Color3.fromRGB(255, 69, 0),     -- Red-orange
+            Color3.fromRGB(255, 215, 0)     -- Gold
+        }
+        
+        for i, color in ipairs(orangeShades) do
+            if currentColor == color and i < #orangeShades then
+                ESPSettings.RoleColors["Prisoner"] = orangeShades[i + 1]
+                break
+            elseif i == #orangeShades or currentColor ~= color then
+                ESPSettings.RoleColors["Prisoner"] = orangeShades[1]
+                break
+            end
+        end
+    end)
+    currentY = currentY + buttonHeight + buttonSpacing
+    
+    local neutralColorButton = createButton("Neutral Color", UDim2.new(0, 0, 0, currentY), true, function()
+        -- Cycle through gray shades
+        local currentColor = ESPSettings.RoleColors["Neutral"]
+        local grayShades = {
+            Color3.fromRGB(128, 128, 128),  -- Gray
+            Color3.fromRGB(169, 169, 169),  -- Dark gray
+            Color3.fromRGB(192, 192, 192),  -- Silver
+            Color3.fromRGB(105, 105, 105)   -- Dim gray
+        }
+        
+        for i, color in ipairs(grayShades) do
+            if currentColor == color and i < #grayShades then
+                ESPSettings.RoleColors["Neutral"] = grayShades[i + 1]
+                break
+            elseif i == #grayShades or currentColor ~= color then
+                ESPSettings.RoleColors["Neutral"] = grayShades[1]
+                break
+            end
         end
     end)
 end
 
--- Function to remove ESP when a player leaves
-local function RemoveESP(Player)
-    if ESP_Objects[Player] then
-        ESP_Objects[Player].Box:Remove()
-        ESP_Objects[Player].Line:Remove()
-        ESP_Objects[Player].Text:Remove()
-        ESP_Objects[Player].RadarDot:Remove()
-        ESP_Objects[Player] = nil
-    end
-end
-
--- Function to properly calculate character size for box dimensions
-local function CalculateBoxDimensions(Character, ScreenPos, Distance)
-    if not Character then return Vector2.new(40, 60) end -- Default size if character not available
-    
-    -- Get the head and root parts for more accurate calculations
-    local Head = Character:FindFirstChild("Head")
-    local Root = Character:FindFirstChild("HumanoidRootPart")
-    
-    if not Head or not Root then
-        -- Use distance-based scaling with fixed ratio if parts aren't available
-        local scaleFactor = 1 / (Distance * 0.05 + 1)
-        local height = math.max(40, 70 * scaleFactor)
-        local width = height * 0.5
-        return Vector2.new(width, height)
-    end
-    
-    -- Get screen positions of top (head) and bottom (root) of the character
-    local headPos = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
-    local rootPos = Camera:WorldToViewportPoint(Root.Position - Vector3.new(0, 2.5, 0))
-    
-    -- Calculate height using vertical distance between head and root on screen
-    local height = math.abs(headPos.Y - rootPos.Y)
-    
-    -- Ensure minimum size for visibility at distance
-    height = math.max(40, height)
-    
-    -- Calculate width maintaining human body aspect ratio (approximately 1:2.5)
-    local width = height * 0.4
-    
-    return Vector2.new(width, height)
-end
-
--- Update radar position based on mouse movement when dragging
-local function UpdateRadarPosition(mousePos)
-    if DraggingRadar then
-        local newPosition = mousePos - DragOffset
-        RadarPosition = newPosition
-        RadarFrame.Position = RadarPosition
-        RadarCenter.Position = RadarPosition + Vector2.new(RadarSize / 2, RadarSize / 2)
-    end
-end
-
--- Setup radar drag functionality
+-- Keyboard shortcuts
+local UserInputService = game:GetService("UserInputService")
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local mousePos = Vector2.new(input.Position.X, input.Position.Y)
+    -- Toggle ESP with Right Control key
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        ESPSettings.Enabled = not ESPSettings.Enabled
+        -- Update GUI if it exists
+        ESPManager:UpdateAllButtons()
         
-        -- Check if mouse is over radar
-        if mousePos.X >= RadarPosition.X and 
-           mousePos.X <= RadarPosition.X + RadarSize and 
-           mousePos.Y >= RadarPosition.Y and 
-           mousePos.Y <= RadarPosition.Y + RadarSize then
-            
-            DraggingRadar = true
-            DragOffset = mousePos - RadarPosition
-        end
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        DraggingRadar = false
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input, gameProcessed)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        UpdateRadarPosition(Vector2.new(input.Position.X, input.Position.Y))
-    end
-end)
-
--- Update ESP and Radar positions dynamically
-local function UpdateESP()
-    if not ESPEnabled then
-        RadarFrame.Visible = false
-        RadarCenter.Visible = false
-        for _, Data in pairs(ESP_Objects) do
-            Data.Box.Visible = false
-            Data.Line.Visible = false
-            Data.Text.Visible = false
-            Data.RadarDot.Visible = false
-        end
-        return
-    end
-    
-    RadarFrame.Visible = true
-    RadarCenter.Visible = true
-    
-    for Player, Data in pairs(ESP_Objects) do
-        -- Check if player character exists, has an HRP, and has a valid humanoid
-        if Player.Character and 
-           Player.Character:FindFirstChild("HumanoidRootPart") and 
-           Data.Humanoid and 
-           Data.IsAlive and -- Check if player is alive
-           Data.Humanoid.Health > 0 then -- Check if player has health
-            
-            local HRP = Data.HRP
-            local Humanoid = Data.Humanoid
-            local ScreenPos, OnScreen = Camera:WorldToViewportPoint(HRP.Position)
-            local Distance = math.floor((HRP.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude)
-            
-            -- Calculate box dimensions based on character properties and distance
-            local BoxDimensions = CalculateBoxDimensions(Player.Character, ScreenPos, Distance)
-            
-            -- Set box position correctly centered on the character
-            Data.Box.Size = BoxDimensions
-            Data.Box.Position = Vector2.new(
-                ScreenPos.X - (BoxDimensions.X / 2),
-                ScreenPos.Y - (BoxDimensions.Y / 2)
-            )
-            
-            -- Update visibility based on whether the player is on screen
-            Data.Box.Visible = OnScreen
-            
-            -- Update team colors
-            local teamName = Player.Team and Player.Team.Name or "Neutral"
-            local correctLineColor = TeamColors[teamName] or Color3.fromRGB(255, 255, 255)
-            Data.Line.Color = correctLineColor
-            Data.RadarDot.Color = correctLineColor
-
-            -- ESP Line
-            Data.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y - 50)
-            Data.Line.To = Vector2.new(ScreenPos.X, ScreenPos.Y)
-            Data.Line.Visible = OnScreen
-
-            -- ESP Text (positioned above the box)
-            Data.Text.Text = string.format("%d M | %s | %d HP", Distance, Player.DisplayName, math.floor(Humanoid.Health))
-            Data.Text.Position = Vector2.new(ScreenPos.X, ScreenPos.Y - (BoxDimensions.Y / 2) - 15)
-            Data.Text.Visible = OnScreen
-
-            -- Radar Logic
-            local LocalHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if LocalHRP then
-                -- Get 2D position for radar (using top-down view, so X and Z components)
-                local RelativePosition = (HRP.Position - LocalHRP.Position) / RadarScale
-                
-                -- Calculate yaw angle from LocalPlayer to convert positions correctly
-                local lookAngle = math.atan2(LocalHRP.CFrame.LookVector.X, LocalHRP.CFrame.LookVector.Z)
-                
-                -- Rotate position for radar (so forward is always up on radar)
-                local rotatedX = RelativePosition.X * math.cos(lookAngle) - RelativePosition.Z * math.sin(lookAngle)
-                local rotatedZ = RelativePosition.X * math.sin(lookAngle) + RelativePosition.Z * math.cos(lookAngle)
-                
-                -- Calculate radar position and clamp to radar bounds
-                local RadarX = math.clamp(RadarSize / 2 + rotatedX, 5, RadarSize - 5)
-                local RadarY = math.clamp(RadarSize / 2 - rotatedZ, 5, RadarSize - 5)
-                
-                Data.RadarDot.Position = RadarPosition + Vector2.new(RadarX, RadarY)
-                Data.RadarDot.Visible = true
-            else
-                Data.RadarDot.Visible = false
-            end
-        else
-            -- Hide ESP if player character is not available or player is dead
-            if ESP_Objects[Player] then
-                ESP_Objects[Player].Box.Visible = false
-                ESP_Objects[Player].Line.Visible = false
-                ESP_Objects[Player].Text.Visible = false
-                ESP_Objects[Player].RadarDot.Visible = false
-                
-                -- Check if the player's health is 0
-                if Data.Humanoid and Data.Humanoid.Health <= 0 then
-                    Data.IsAlive = false
-                end
-            end
-        end
-    end
-end
-
--- Toggle to enable/disable ESP
-local Toggle = MainTab:CreateToggle({
-   Name = "Toggle ESP",
-   CurrentValue = false,
-   Flag = "ToggleESP", 
-   Callback = function(Value)
-       ESPEnabled = Value
-       Rayfield:Notify({
-          Title = "ESP " .. (ESPEnabled and "Enabled" or "Disabled"),
-          Content = "ESP and Radar are now " .. (ESPEnabled and "ON" or "OFF"),
-          Duration = 3.5,
-          Image = nil,
-       })
-   end,
-})
-
--- Setup ESP for existing players
-for _, Player in pairs(Players:GetPlayers()) do
-    if Player ~= LocalPlayer then
-        CreateESP(Player)
-    end
-end
-
--- Listen for new players joining
-Players.PlayerAdded:Connect(CreateESP)
-
--- Listen for players leaving
-Players.PlayerRemoving:Connect(RemoveESP)
-
--- Update loop
-RunService.RenderStepped:Connect(UpdateESP)
-
--- Simplified Aimbot & Silent Aim System
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-
--- Core Settings
-local Settings = {
-    -- Aimbot
-    AimbotEnabled = false,
-    -- Silent Aim
-    SilentAimEnabled = false,
-    -- Shared Settings
-    TeamCheck = true,
-    TargetPart = "Head",
-    TargetPriority = "Closest" -- "Closest", "LowestHealth", "Random"
-}
-
--- Variables
-local CurrentTarget = nil
-
--- Function to check if a player is on the same team
-local function IsTeammate(Player)
-    if Settings.TeamCheck then
-        return Player.Team == LocalPlayer.Team
-    end
-    return false
-end
-
--- Function to get all valid targets
-local function GetValidTargets()
-    local ValidTargets = {}
-    
-    for _, Player in pairs(Players:GetPlayers()) do
-        if Player == LocalPlayer then continue end
-        
-        -- Team check
-        if IsTeammate(Player) then continue end
-        
-        -- Character checks
-        if not Player.Character or not Player.Character:FindFirstChild("Humanoid") then continue end
-        if Player.Character.Humanoid.Health <= 0 then continue end
-        
-        -- Target part check
-        local TargetPart = Player.Character:FindFirstChild(Settings.TargetPart)
-        if not TargetPart then 
-            -- Fallback to HumanoidRootPart if the target part doesn't exist
-            TargetPart = Player.Character:FindFirstChild("HumanoidRootPart")
-            if not TargetPart then continue end
-        end
-        
-        -- Distance calculation
-        local Distance = (TargetPart.Position - Camera.CFrame.Position).Magnitude
-        
-        -- Add to valid targets
-        table.insert(ValidTargets, {
-            Player = Player,
-            Distance = Distance,
-            Health = Player.Character.Humanoid.Health,
-            TargetPart = TargetPart
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Role ESP",
+            Text = ESPSettings.Enabled and "Enabled" or "Disabled",
+            Duration = 2
         })
     end
     
-    return ValidTargets
-end
-
--- Function to get the best target based on priority
-local function GetBestTarget()
-    local ValidTargets = GetValidTargets()
-    if #ValidTargets == 0 then return nil end
-    
-    -- Sort targets based on priority method
-    if Settings.TargetPriority == "Closest" then
-        table.sort(ValidTargets, function(a, b)
-            return a.Distance < b.Distance
-        end)
-    elseif Settings.TargetPriority == "LowestHealth" then
-        table.sort(ValidTargets, function(a, b)
-            return a.Health < b.Health
-        end)
-    elseif Settings.TargetPriority == "Random" then
-        return ValidTargets[math.random(1, #ValidTargets)]
-    end
-    
-    return ValidTargets[1]
-end
-
--- Function to aim at target (for aimbot)
-local function AimAtTarget(Target)
-    if not Target or not Target.TargetPart then return end
-    
-    local TargetPosition = Target.TargetPart.Position
-    local TargetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPosition)
-    
-    -- Set camera to target
-    Camera.CFrame = TargetCFrame
-end
-
--- Silent aim hook (will hook into the game's shooting mechanics)
-local OldNamecall
-OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
-    local Args = {...}
-    local Method = getnamecallmethod()
-    
-    -- Only activate if silent aim is enabled
-    if Settings.SilentAimEnabled and (Method == "FireServer" or Method == "InvokeServer") and checkcaller() == false then
-        -- Only modify if this is a shooting-related remote
-        local RemoteName = tostring(Self)
-        if RemoteName:lower():find("shoot") or RemoteName:lower():find("fire") or RemoteName:lower():find("hit") then
-            local Target = GetBestTarget()
-            if Target and Target.TargetPart then
-                -- Modify the arguments to redirect to the target
-                -- This is generic and will need adjusting for specific games
-                for i, v in pairs(Args) do
-                    if typeof(v) == "Vector3" then
-                        Args[i] = Target.TargetPart.Position
-                    elseif typeof(v) == "CFrame" then
-                        Args[i] = CFrame.new(v.Position, Target.TargetPart.Position)
-                    elseif typeof(v) == "Instance" and v:IsA("BasePart") then
-                        Args[i] = Target.TargetPart
-                    end
-                end
-            end
-        end
-    end
-    
-    return OldNamecall(Self, unpack(Args))
-end)
-
--- Main aimbot loop
-RunService.RenderStepped:Connect(function()
-    if Settings.AimbotEnabled then
-        local Target = GetBestTarget()
-        if Target then
-            AimAtTarget(Target)
-        end
+    -- Toggle GUI with Right Alt key
+    if input.KeyCode == Enum.KeyCode.RightAlt then
+        ESPManager:ToggleGUI()
     end
 end)
 
--- UI Creation - Basic implementation for the features you requested
-local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "Simplified Aimbot",
-   LoadingTitle = "Loading...",
-   LoadingSubtitle = "by Claude",
+-- Start the ESP
+ESPManager:Start()
+   end,
 })
 
-local MainTab = Window:CreateTab("Main", nil)
+local Toggle = MainTab:CreateToggle({
+   Name = "Instant Aim Bot",
+   CurrentValue = false,
+   Flag = "Toggle1", 
+   Callback = function(Value)
+       if Value then
+           -- Configuration
+           local ASSIST_RANGE = 200       -- Maximum range to detect targets
+           local HEAD_OFFSET = Vector3.new(0, 0.1, 0)  -- Fine-tune head targeting
+           local INSTANT_SNAP = true      -- Set to true for instant head snapping
 
--- Aimbot Toggle
-MainTab:CreateToggle({
-    Name = "Aimbot Toggle",
-    CurrentValue = false,
-    Flag = "AimbotToggle", 
-    Callback = function(Value)
-        Settings.AimbotEnabled = Value
-    end,
+           local Players = game:GetService("Players")
+           local RunService = game:GetService("RunService")
+           local UserInputService = game:GetService("UserInputService")
+           local Teams = game:GetService("Teams")
+           
+           local LocalPlayer = Players.LocalPlayer
+           local Camera = workspace.CurrentCamera
+           
+           -- Function to check if a player is on the same team
+           local function isTeammate(player)
+               if not LocalPlayer.Team then return false end
+               return player.Team == LocalPlayer.Team
+           end
+           
+           -- Function to check if a character is valid target
+           local function isValidTarget(character, player)
+               if not character then return false end
+               
+               -- Check if character has necessary parts
+               local humanoid = character:FindFirstChild("Humanoid")
+               local head = character:FindFirstChild("Head")
+               
+               -- If it's a player, check team status
+               if player then
+                   if isTeammate(player) then return false end
+               end
+               
+               return humanoid 
+                   and head 
+                   and humanoid.Health > 0
+           end
+           
+           -- Function to get nearest target
+           local function getNearestTarget()
+               local nearestDistance = ASSIST_RANGE
+               local nearestTarget = nil
+               local playerChar = LocalPlayer.Character
+               local playerHead = playerChar and playerChar:FindFirstChild("Head")
+               
+               if not playerHead then return nil end
+               
+               -- Check players
+               for _, player in pairs(Players:GetPlayers()) do
+                   if player ~= LocalPlayer then
+                       local character = player.Character
+                       if isValidTarget(character, player) then
+                           local targetHead = character.Head
+                           local distance = (playerHead.Position - targetHead.Position).Magnitude
+                           
+                           if distance < nearestDistance then
+                               nearestDistance = distance
+                               nearestTarget = character
+                           end
+                       end
+                   end
+               end
+               
+               -- Check NPCs/monsters (checking multiple possible folder names)
+               local possibleFolders = {"NPCs", "Monsters", "Enemies", "Mobs"}
+               for _, folderName in pairs(possibleFolders) do
+                   local folder = workspace:FindFirstChild(folderName)
+                   if folder then
+                       for _, npc in pairs(folder:GetChildren()) do
+                           if isValidTarget(npc) then
+                               local targetHead = npc.Head
+                               local distance = (playerHead.Position - targetHead.Position).Magnitude
+                               
+                               if distance < nearestDistance then
+                                   nearestDistance = distance
+                                   nearestTarget = npc
+                               end
+                           end
+                       end
+                   end
+               end
+               
+               return nearestTarget
+           end
+           
+           -- Function to instantly snap to target's head
+           local function snapToTarget(target)
+               if not target then return end
+               
+               local targetHead = target.Head
+               local aimPosition = targetHead.Position + HEAD_OFFSET
+               
+               -- Instantly set camera to look at target
+               Camera.CFrame = CFrame.lookAt(
+                   Camera.CFrame.Position,
+                   aimPosition
+               )
+           end
+           
+           -- Function to update camera aim
+           local function updateAim()
+               local target = getNearestTarget()
+               if not target then return end
+               
+               local targetHead = target.Head
+               local aimPosition = targetHead.Position + HEAD_OFFSET
+               local playerChar = LocalPlayer.Character
+               
+               if playerChar and playerChar:FindFirstChild("Head") then
+                   if INSTANT_SNAP then
+                       -- Instant snap to target head
+                       Camera.CFrame = CFrame.lookAt(
+                           Camera.CFrame.Position,
+                           aimPosition
+                       )
+                   else
+                       -- Original smooth aiming (for reference)
+                       local aimAt = CFrame.lookAt(
+                           Camera.CFrame.Position,
+                           aimPosition
+                       )
+                       Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
+                   end
+               end
+           end
+           
+           -- Check for equipped items
+           local function checkForEquippedWeapon()
+               local character = LocalPlayer.Character
+               if not character then return false end
+               
+               -- Look for tool in character (equipped item)
+               for _, item in pairs(character:GetChildren()) do
+                   if item:IsA("Tool") then
+                       return true
+                   end
+               end
+               
+               return false
+           end
+           
+           -- Enhanced update function that checks weapon status
+           local function enhancedUpdate()
+               local hasWeapon = checkForEquippedWeapon()
+               local target = getNearestTarget()
+               
+               if not target then return end
+               
+               if hasWeapon then
+                   -- Weapon equipped - instant snap
+                   snapToTarget(target)
+               else
+                   -- No weapon - use smooth tracking (optional)
+                   local targetHead = target.Head
+                   local aimPosition = targetHead.Position + HEAD_OFFSET
+                   
+                   local aimAt = CFrame.lookAt(
+                       Camera.CFrame.Position,
+                       aimPosition
+                   )
+                   Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
+               end
+           end
+           
+           -- Connect update function
+           _G.AimAssistConnection = RunService.RenderStepped:Connect(enhancedUpdate)
+           
+       else
+           -- Cleanup when toggled off
+           if _G.AimAssistConnection then
+               _G.AimAssistConnection:Disconnect()
+               _G.AimAssistConnection = nil
+           end
+       end
+   end
 })
 
--- Silent Aim Toggle
-MainTab:CreateToggle({
-    Name = "Silent Aim Toggle",
-    CurrentValue = false,
-    Flag = "SilentAimToggle", 
-    Callback = function(Value)
-        Settings.SilentAimEnabled = Value
-    end,
+local Toggle = MainTab:CreateToggle({
+   Name = "Advanced Instant Aim Bot",
+   CurrentValue = false,
+   Flag = "Toggle2", 
+   Callback = function(Value)
+       if Value then
+           -- Configuration
+           local ASSIST_RANGE = 200       -- Maximum range to detect targets
+           local HEAD_OFFSET = Vector3.new(0, 0.1, 0)  -- Fine-tune head targeting
+           local INSTANT_SNAP = true      -- Set to true for instant head snapping
+           local WALL_CHECK = true        -- Set to true to ignore targets behind walls
+           
+           local Players = game:GetService("Players")
+           local RunService = game:GetService("RunService")
+           local UserInputService = game:GetService("UserInputService")
+           local Teams = game:GetService("Teams")
+           
+           local LocalPlayer = Players.LocalPlayer
+           local Camera = workspace.CurrentCamera
+           
+           -- Function to check if a player is on the same team
+           local function isTeammate(player)
+               if not LocalPlayer.Team then return false end
+               return player.Team == LocalPlayer.Team
+           end
+           
+           -- Function to check if target is visible (not behind wall)
+           local function isTargetVisible(targetPosition)
+               local playerChar = LocalPlayer.Character
+               if not playerChar or not playerChar:FindFirstChild("Head") then return false end
+               
+               local ray = Ray.new(playerChar.Head.Position, targetPosition - playerChar.Head.Position)
+               local hit, hitPosition = workspace:FindPartOnRayWithIgnoreList(
+                   ray,
+                   {LocalPlayer.Character, Camera, workspace:FindFirstChild("Ignore")},
+                   false,
+                   true
+               )
+               
+               if hit then
+                   local distanceToHit = (hitPosition - playerChar.Head.Position).Magnitude
+                   local distanceToTarget = (targetPosition - playerChar.Head.Position).Magnitude
+                   
+                   -- If the hit distance is close to the target distance, the target is visible
+                   return math.abs(distanceToHit - distanceToTarget) < 5
+               end
+               
+               return true
+           end
+           
+           -- Function to get best target with priority
+           local function getBestTarget()
+               local targets = {}
+               local playerChar = LocalPlayer.Character
+               local playerHead = playerChar and playerChar:FindFirstChild("Head")
+               
+               if not playerHead then return nil end
+               
+               -- Check players
+               for _, player in pairs(Players:GetPlayers()) do
+                   if player ~= LocalPlayer then
+                       local character = player.Character
+                       if isValidTarget(character, player) then
+                           local targetHead = character.Head
+                           local distance = (playerHead.Position - targetHead.Position).Magnitude
+                           
+                           -- Check visibility if wall check is enabled
+                           local visible = true
+                           if WALL_CHECK then
+                               visible = isTargetVisible(targetHead.Position)
+                           end
+                           
+                           if distance < ASSIST_RANGE and (visible or not WALL_CHECK) then
+                               -- Calculate target priority (lower distance = higher priority)
+                               local priority = (ASSIST_RANGE - distance)
+                               
+                               -- Bonus priority for visible targets
+                               if visible then
+                                   priority = priority * 1.5
+                               end
+                               
+                               -- Calculate aim angle (lower angle = higher priority)
+                               local lookVector = Camera.CFrame.LookVector
+                               local toTarget = (targetHead.Position - Camera.CFrame.Position).Unit
+                               local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
+                               
+                               -- Add angle-based priority (targets in front have higher priority)
+                               priority = priority + (math.pi - angle) * 20
+                               
+                               table.insert(targets, {
+                                   character = character,
+                                   distance = distance,
+                                   priority = priority
+                               })
+                           end
+                       end
+                   end
+               end
+               
+               -- Check NPCs using the same priority system
+               local possibleFolders = {"NPCs", "Monsters", "Enemies", "Mobs"}
+               for _, folderName in pairs(possibleFolders) do
+                   local folder = workspace:FindFirstChild(folderName)
+                   if folder then
+                       for _, npc in pairs(folder:GetChildren()) do
+                           if isValidTarget(npc) then
+                               local targetHead = npc.Head
+                               local distance = (playerHead.Position - targetHead.Position).Magnitude
+                               
+                               -- Check visibility if wall check is enabled
+                               local visible = true
+                               if WALL_CHECK then
+                                   visible = isTargetVisible(targetHead.Position)
+                               end
+                               
+                               if distance < ASSIST_RANGE and (visible or not WALL_CHECK) then
+                                   -- Calculate priority
+                                   local priority = (ASSIST_RANGE - distance)
+                                   
+                                   if visible then
+                                       priority = priority * 1.5
+                                   end
+                                   
+                                   -- Calculate aim angle
+                                   local lookVector = Camera.CFrame.LookVector
+                                   local toTarget = (targetHead.Position - Camera.CFrame.Position).Unit
+                                   local angle = math.acos(math.clamp(lookVector:Dot(toTarget), -1, 1))
+                                   
+                                   priority = priority + (math.pi - angle) * 20
+                                   
+                                   table.insert(targets, {
+                                       character = npc,
+                                       distance = distance,
+                                       priority = priority
+                                   })
+                               end
+                           end
+                       end
+                   end
+               end
+               
+               -- Sort targets by priority and return the highest
+               table.sort(targets, function(a, b)
+                   return a.priority > b.priority
+               end)
+               
+               return targets[1] and targets[1].character or nil
+           end
+           
+           -- Function to instantly snap to target's head
+           local function snapToTarget(target)
+               if not target then return end
+               
+               local targetHead = target.Head
+               local aimPosition = targetHead.Position + HEAD_OFFSET
+               
+               -- Instantly set camera to look at target
+               Camera.CFrame = CFrame.lookAt(
+                   Camera.CFrame.Position,
+                   aimPosition
+               )
+           end
+           
+           -- Function to check for equipped weapons
+           local function isWeaponEquipped()
+               local character = LocalPlayer.Character
+               if not character then return false end
+               
+               -- Look for tool in character (equipped item)
+               for _, item in pairs(character:GetChildren()) do
+                   if item:IsA("Tool") then
+                       return true
+                   end
+               end
+               
+               return false
+           end
+           
+           -- Main update function
+           local function advancedUpdate()
+               local target = getBestTarget()
+               if not target then return end
+               
+               local hasWeapon = isWeaponEquipped()
+               
+               if hasWeapon and INSTANT_SNAP then
+                   -- Weapon equipped - instant head snapping
+                   snapToTarget(target)
+               else
+                   -- No weapon or smooth aiming is preferred
+                   local targetHead = target.Head
+                   local aimPosition = targetHead.Position + HEAD_OFFSET
+                   
+                   local aimAt = CFrame.lookAt(
+                       Camera.CFrame.Position,
+                       aimPosition
+                   )
+                   
+                   -- Use either instant snap or smooth tracking
+                   if INSTANT_SNAP then
+                       Camera.CFrame = aimAt
+                   else
+                       Camera.CFrame = Camera.CFrame:Lerp(aimAt, 0.2)
+                   end
+               end
+           end
+           
+           -- Connect update function
+           _G.AdvancedAimConnection = RunService.RenderStepped:Connect(advancedUpdate)
+           
+       else
+           -- Cleanup when toggled off
+           if _G.AdvancedAimConnection then
+               _G.AdvancedAimConnection:Disconnect()
+               _G.AdvancedAimConnection = nil
+           end
+       end
+   end
 })
 
--- Team Check Toggle
-MainTab:CreateToggle({
-    Name = "Team Check",
-    CurrentValue = true,
-    Flag = "TeamCheck",
-    Callback = function(Value)
-        Settings.TeamCheck = Value
-    end,
-})
-
--- Target Priority Dropdown
-MainTab:CreateDropdown({
-    Name = "Target Priority",
-    Options = {"Closest", "LowestHealth", "Random"},
-    CurrentOption = "Closest",
-    Flag = "TargetPriority",
-    Callback = function(Option)
-        Settings.TargetPriority = Option
-    end,
-})
-
--- Target Part Dropdown
-MainTab:CreateDropdown({
-    Name = "Target Part",
-    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
-    CurrentOption = "Head",
-    Flag = "TargetPart",
-    Callback = function(Option)
-        Settings.TargetPart = Option
-    end,
-})
+-- Helper function for use in both toggles
+local function isValidTarget(character, player)
+    if not character then return false end
+    
+    -- Check if character has necessary parts
+    local humanoid = character:FindFirstChild("Humanoid")
+    local head = character:FindFirstChild("Head")
+    
+    -- If it's a player, check team status
+    if player then
+        local LocalPlayer = game:GetService("Players").LocalPlayer
+        if not LocalPlayer.Team then return true end
+        if player.Team == LocalPlayer.Team then return false end
+    end
+    
+    return humanoid 
+        and head 
+        and humanoid.Health > 0
+end
 
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
