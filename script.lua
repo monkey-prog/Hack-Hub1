@@ -1201,7 +1201,7 @@ local function enableNoClip()
     return noclipConnection
 end
 
--- Complete the teleport callback function
+-- Complete the teleport function
 local function teleportPlayer(selectedLocation, position)
     -- Create transition screen
     local transitionScreen = createTransitionScreen(selectedLocation)
@@ -1256,35 +1256,50 @@ local function teleportPlayer(selectedLocation, position)
     tween:Play()
 end
 
--- Now update your teleport callback in the dropdown
-Callback = function(Option)
-    -- Check if a location was selected
-    if #Option == 0 then
-        return -- No location selected, do nothing
-    end
-    
-    -- Get the selected location from the dropdown
-    local selectedLocation = Option[1]
-    
-    -- Define all teleport positions
-    local teleportLocations = {
-        ["Construction Job"] = Vector3.new(-1729, 370, -1171),
-        ["Warehouse"] = Vector3.new(-1563, 258, -1174),
-        ["Ice Box"] = Vector3.new(-202, 283, -1169),
-        ["Land Lord"] = Vector3.new(-209, 283, -1240),
-        ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
-        ["Car Dealership"] = Vector3.new(-374, 253, -1247),
-        ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
-    }
-    
-    -- Get the target position
-    local targetPosition = teleportLocations[selectedLocation]
-    
-    -- Teleport to the selected location
-    if targetPosition then
-        teleportPlayer(selectedLocation, targetPosition)
-    end
-end
+-- Create the dropdown
+local Dropdown = TeleportTab:CreateDropdown({
+   Name = "Teleport Locations",
+   Options = {
+       "Construction Job",
+       "Warehouse",
+       "Ice Box",
+       "Land Lord",
+       "Pawn Shop",
+       "Car Dealership", 
+       "McDonalds Job"
+   },
+   CurrentOption = {}, -- Empty table means no initial selection
+   MultipleOptions = false,
+   Flag = "TeleportLocation",
+   Callback = function(Option)
+       -- Check if a location was selected
+       if #Option == 0 then
+           return -- No location selected, do nothing
+       end
+       
+       -- Get the selected location from the dropdown
+       local selectedLocation = Option[1]
+       
+       -- Define all teleport positions
+       local teleportLocations = {
+           ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+           ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+           ["Ice Box"] = Vector3.new(-202, 283, -1169),
+           ["Land Lord"] = Vector3.new(-209, 283, -1240),
+           ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+           ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+           ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+       }
+       
+       -- Get the target position
+       local targetPosition = teleportLocations[selectedLocation]
+       
+       -- Teleport to the selected location
+       if targetPosition then
+           teleportPlayer(selectedLocation, targetPosition)
+       end
+   }
+})
 
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
 local MiscSection = MiscTab:CreateSection("Misc")
