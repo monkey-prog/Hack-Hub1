@@ -1276,11 +1276,13 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end)
             end
             
-            -- Direct teleport while screen is black
-            rootPart.CFrame = CFrame.new(targetPosition)
+            -- Teleport the player to the target position
+            rootPart.CFrame = CFrame.new(targetPosition + Vector3.new(0, 5, 0)) -- 5 studs above the target
+            task.wait(0.1) -- Small delay to stabilize
+            rootPart.CFrame = CFrame.new(targetPosition) -- Move to the exact position
             
-            -- Small wait to ensure rendering has caught up
-            task.wait(0.2)
+            -- Small delay to avoid anti-cheat detection
+            task.wait(0.5)
             
             -- Clean up and fade out black screen
             cleanUp()
