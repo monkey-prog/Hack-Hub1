@@ -1124,8 +1124,13 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+
+-- Reference to your UI tab (assumed to be already created)
+-- Modify this to match your actual UI setup
+local TeleportTab = script.Parent.Parent.TeleportTab
 
 local Dropdown = TeleportTab:CreateDropdown({
     Name = "Teleport Locations",
@@ -1158,10 +1163,21 @@ local Dropdown = TeleportTab:CreateDropdown({
         
         -- Make sure the position exists
         if targetPosition then
-            local player = game.Players.LocalPlayer
-            local character = player.Character or player.CharacterAdded:Wait()
-            local humanoid = character:WaitForChild("Humanoid")
-            local rootPart = character:WaitForChild("HumanoidRootPart")
+            local player = Players.LocalPlayer
+            local character = player.Character
+            
+            if not character then
+                warn("Character not found!")
+                return
+            end
+            
+            local humanoid = character:FindFirstChild("Humanoid")
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            
+            if not humanoid or not rootPart then
+                warn("Humanoid or HumanoidRootPart not found!")
+                return
+            end
             
             -- Cancel existing teleport
             if _G.SafeTeleportActive then
@@ -1193,7 +1209,7 @@ local Dropdown = TeleportTab:CreateDropdown({
             teleportingText.Size = UDim2.new(1, 0, 0.1, 0)
             teleportingText.Position = UDim2.new(0, 0, 0.45, 0)
             teleportingText.BackgroundTransparency = 1
-            teleportingText.Text = "Teleporting..."
+            teleportingText.Text = "Teleporting to " .. Option .. "..."
             teleportingText.TextColor3 = Color3.new(1, 1, 1)
             teleportingText.TextSize = 24
             teleportingText.Font = Enum.Font.SourceSansBold
@@ -1203,7 +1219,7 @@ local Dropdown = TeleportTab:CreateDropdown({
             -- Add the GUI to PlayerGui
             screenGui.Parent = player.PlayerGui
             
-            -- Fade in black screen and text immediately
+            -- Fade in black screen and text
             local fadeInTween = TweenService:Create(
                 blackFrame, 
                 TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
@@ -1217,7 +1233,9 @@ local Dropdown = TeleportTab:CreateDropdown({
             
             fadeInTween:Play()
             textFadeInTween:Play()
-            fadeInTween.Completed:Wait()
+            
+            -- Wait for fade to complete
+            task.wait(0.3)
             
             -- Save original humanoid properties
             local originalWalkSpeed = humanoid.WalkSpeed
@@ -1237,11 +1255,9 @@ local Dropdown = TeleportTab:CreateDropdown({
                     end
                 end
                 
-                -- Keep velocity at zero
-                if rootPart then
-                    rootPart.Velocity = Vector3.new(0, 0, 0)
-                    rootPart.RotVelocity = Vector3.new(0, 0, 0)
-                end
+                -- Keep velocity at zero to prevent physics issues
+                rootPart.Velocity = Vector3.new(0, 0, 0)
+                rootPart.RotVelocity = Vector3.new(0, 0, 0)
             end)
             
             -- Function to clean up
@@ -1250,7 +1266,6 @@ local Dropdown = TeleportTab:CreateDropdown({
                 
                 if noclipConnection then
                     noclipConnection:Disconnect()
-                    noclipConnection = nil
                 end
                 
                 -- Restore original humanoid properties
@@ -1280,30 +1295,24 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end)
             end
             
-            -- Instant teleport function
-            local function instantTeleport(targetPos)
-                -- Keep the screen black during the entire teleport
+            -- Perform teleportation
+            task.spawn(function()
                 task.wait(0.5) -- Small buffer for stability
                 
-                -- Direct teleport to destination without intermediate steps
-                rootPart.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
-                task.wait(0.2) -- Brief pause for stability
-                rootPart.CFrame = CFrame.new(targetPos)
+                -- Direct teleport - ensure we're directly setting CFrame
+                rootPart.CFrame = CFrame.new(targetPosition)
                 
-                -- Ensure we're not stuck in anything
-                task.wait(0.3)
+                -- Try an alternative method if needed
+                if (rootPart.Position - targetPosition).Magnitude > 10 then
+                    -- If we're still not close enough, try another approach
+                    rootPart.Anchored = true
+                    rootPart.CFrame = CFrame.new(targetPosition)
+                    task.wait(0.1)
+                    rootPart.Anchored = false
+                end
                 
-                -- Additional delay before revealing screen to ensure everything is loaded
+                -- Wait to ensure teleport completes
                 task.wait(0.5)
-            end
-            
-            -- Main teleport sequence
-            task.spawn(function()
-                -- Keep the black screen during the entire process
-                teleportingText.Text = "Teleporting to " .. Option .. "..."
-                
-                -- Perform the instant teleport
-                instantTeleport(targetPosition)
                 
                 -- Clean up after teleport is complete
                 cleanUp()
@@ -1312,6 +1321,10 @@ local Dropdown = TeleportTab:CreateDropdown({
             -- Safety timeout (5 seconds max)
             task.delay(5, function()
                 if _G.SafeTeleportActive then
+                    warn("Teleport timed out, forcing cleanup")
+                    if rootPart.Anchored then
+                        rootPart.Anchored = false
+                    end
                     cleanUp()
                 end
             end)
