@@ -1124,15 +1124,21 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+
 local Dropdown = TeleportTab:CreateDropdown({
     Name = "Teleport Locations",
     Options = {
-        "Construction Job", 
-        "Warehouse", 
-        "Ice Box", 
-        "Land Lord", 
-        "Pawn Shop", 
-        "Car Dealership", 
+        "Construction Job",
+        "Warehouse",
+        "Ice Box",
+        "Land Lord",
+        "Pawn Shop",
+        "Car Dealership",
         "McDonalds Job"
     },
     CurrentOption = {}, -- Empty table means no initial selection
@@ -1158,100 +1164,136 @@ local Dropdown = TeleportTab:CreateDropdown({
             ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
         }
         
-        -- Get destination position
-        local finalDestination = teleportLocations[selectedLocation]
-        
-        -- Create transition screen
+        -- Create the transition GUI
         local ScreenGui = Instance.new("ScreenGui")
-        ScreenGui.Name = "TeleportScreen"
-        ScreenGui.IgnoreGuiInset = true
-        ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+        ScreenGui.Name = "TeleportTransition"
+        ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        ScreenGui.Parent = Player.PlayerGui
         
-        local Background = Instance.new("Frame")
-        Background.Name = "Background"
-        Background.Size = UDim2.new(1, 0, 1, 0)
-        Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        Background.Parent = ScreenGui
+        local Frame = Instance.new("Frame")
+        Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        Frame.Size = UDim2.new(1, 0, 1, 0)
+        Frame.BackgroundTransparency = 1
+        Frame.Parent = ScreenGui
         
-        local TeleportText = Instance.new("TextLabel")
-        TeleportText.Name = "TeleportText"
-        TeleportText.Size = UDim2.new(1, 0, 0, 50)
-        TeleportText.Position = UDim2.new(0, 0, 0.5, -25)
-        TeleportText.BackgroundTransparency = 1
-        TeleportText.Text = "Teleporting to " .. selectedLocation .. "..."
-        TeleportText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        TeleportText.Font = Enum.Font.GothamBold
-        TeleportText.TextSize = 24
-        TeleportText.Parent = Background
+        local TextLabel = Instance.new("TextLabel")
+        TextLabel.BackgroundTransparency = 1
+        TextLabel.Size = UDim2.new(1, 0, 0, 50)
+        TextLabel.Position = UDim2.new(0, 0, 0.5, -25)
+        TextLabel.Font = Enum.Font.GothamBold
+        TextLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TextLabel.TextSize = 24
+        TextLabel.Text = "Teleporting to " .. selectedLocation .. "..."
+        TextLabel.TextTransparency = 1
+        TextLabel.Parent = Frame
         
-        -- Get character and root part
-        local player = game.Players.LocalPlayer
-        local character = player.Character or player.CharacterAdded:Wait()
-        local rootPart = character:WaitForChild("HumanoidRootPart")
-        local humanoid = character:WaitForChild("Humanoid")
-        
-        -- Setup noclip
-        local noclipConnection
-        noclipConnection = game:GetService("RunService").Stepped:Connect(function()
-            for _, part in pairs(character:GetDescendants()) do
+        -- Function to handle the teleportation with no-clip and damage prevention
+        local function teleportToLocation()
+            local targetPosition = teleportLocations[selectedLocation]
+            local humanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = Character:FindFirstChild("Humanoid")
+            
+            if not humanoidRootPart or not humanoid then
+                return
+            end
+            
+            -- Save original properties to restore later
+            local originalWalkSpeed = humanoid.WalkSpeed
+            local originalJumpPower = humanoid.JumpPower
+            local originalCollisionState = {}
+            for _, part in pairs(Character:GetDescendants()) do
                 if part:IsA("BasePart") then
-                    part.CanCollide = false
+                    originalCollisionState[part] = {
+                        CanCollide = part.CanCollide,
+                        CanTouch = part.CanTouch,
+                        CanQuery = part.CanQuery
+                    }
                 end
             end
-        end)
-        
-        -- Function to get a safe character reference
-        local function getChar()
-            if not character or not character.Parent then
-                character = player.Character or player.CharacterAdded:Wait()
-                rootPart = character:WaitForChild("HumanoidRootPart")
-                humanoid = character:WaitForChild("Humanoid")
-            end
-            return character, rootPart, humanoid
-        end
-        
-        -- Handle possible damage during teleport (ignore damage)
-        local healthChangedConnection
-        healthChangedConnection = humanoid.HealthChanged:Connect(function()
-            -- Ignore damage, continue teleporting
-        end)
-        
-        -- Start incremental teleportation
-        local jumpDistance = 50 -- 50 studs per jump
-        local waitTime = 2 -- 2 seconds between jumps
-        
-        -- Start teleport coroutine
-        coroutine.wrap(function()
-            local startPosition = rootPart.Position
-            local totalDistance = (startPosition - finalDestination).Magnitude
-            local currentPosition = startPosition
             
-            while (currentPosition - finalDestination).Magnitude > jumpDistance do
-                -- Get direction vector
-                local direction = (finalDestination - currentPosition).Unit
-                -- Calculate next position (50 studs in direction of target)
-                local nextPosition = currentPosition + (direction * jumpDistance)
-                
-                -- Get fresh character references
-                local _, currentRoot = getChar()
-                
-                -- Teleport to next position
-                currentRoot.CFrame = CFrame.new(nextPosition)
-                currentPosition = nextPosition
-                
-                -- Wait between jumps
-                wait(waitTime)
-            end
+            -- Enable no-clip
+            local noClipConnection = RunService.Stepped:Connect(function()
+                for _, part in pairs(Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                        part.CanTouch = false
+                        part.CanQuery = false
+                    end
+                end
+            end)
             
-            -- Final teleport to exact destination
-            local _, finalRoot = getChar()
-            finalRoot.CFrame = CFrame.new(finalDestination)
+            -- Prevent damage during teleport
+            local oldHealth = humanoid.Health
+            local damagePreventionConnection = humanoid.HealthChanged:Connect(function(newHealth)
+                if newHealth < oldHealth then
+                    humanoid.Health = oldHealth
+                else
+                    oldHealth = newHealth
+                end
+            end)
+            
+            -- Create tween to teleport character
+            local distance = (targetPosition - humanoidRootPart.Position).Magnitude
+            local travelTime = distance / 30 -- 30 studs per second max speed
+            
+            local tweenInfo = TweenInfo.new(
+                travelTime,
+                Enum.EasingStyle.Linear,
+                Enum.EasingDirection.Out,
+                0,
+                false,
+                0
+            )
+            
+            local tweenGoal = {
+                CFrame = CFrame.new(targetPosition)
+            }
+            
+            local tween = TweenService:Create(humanoidRootPart, tweenInfo, tweenGoal)
+            
+            -- Fade in transition
+            local fadeInTween = TweenService:Create(Frame, TweenInfo.new(0.5), {BackgroundTransparency = 0})
+            local textFadeInTween = TweenService:Create(TextLabel, TweenInfo.new(0.5), {TextTransparency = 0})
+            
+            fadeInTween:Play()
+            textFadeInTween:Play()
+            
+            fadeInTween.Completed:Wait()
+            
+            -- Start teleport
+            tween:Play()
+            
+            -- Wait for tween to complete
+            tween.Completed:Wait()
+            
+            -- Fade out transition
+            local fadeOutTween = TweenService:Create(Frame, TweenInfo.new(0.5), {BackgroundTransparency = 1})
+            local textFadeOutTween = TweenService:Create(TextLabel, TweenInfo.new(0.5), {TextTransparency = 1})
+            
+            fadeOutTween:Play()
+            textFadeOutTween:Play()
+            
+            fadeOutTween.Completed:Wait()
             
             -- Clean up
-            if noclipConnection then noclipConnection:Disconnect() end
-            if healthChangedConnection then healthChangedConnection:Disconnect() end
             ScreenGui:Destroy()
-        end)()
+            noClipConnection:Disconnect()
+            damagePreventionConnection:Disconnect()
+            
+            -- Restore original properties
+            humanoid.WalkSpeed = originalWalkSpeed
+            humanoid.JumpPower = originalJumpPower
+            for part, state in pairs(originalCollisionState) do
+                if part and part:IsA("BasePart") then
+                    part.CanCollide = state.CanCollide
+                    part.CanTouch = state.CanTouch
+                    part.CanQuery = state.CanQuery
+                end
+            end
+        end
+        
+        -- Start the teleportation process
+        task.spawn(teleportToLocation)
     end
 })
 
