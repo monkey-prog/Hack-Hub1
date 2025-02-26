@@ -1128,10 +1128,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
--- Reference to your UI tab (assumed to be already created)
--- Modify this to match your actual UI setup
-local TeleportTab = script.Parent.Parent.TeleportTab
-
 local Dropdown = TeleportTab:CreateDropdown({
     Name = "Teleport Locations",
     Options = {
