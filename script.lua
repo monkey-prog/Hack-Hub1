@@ -1276,19 +1276,57 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end)
             end
             
-            -- Teleport the player to the target position
+            -- Function to calculate waypoints
+            local function calculateWaypoints(startPos, endPos)
+                local waypoints = {}
+                local distance = (endPos - startPos).Magnitude
+                local steps = math.ceil(distance / 50) -- Break into 50-stud segments
+                
+                for i = 1, steps do
+                    local fraction = i / steps
+                    local waypoint = startPos:Lerp(endPos, fraction)
+                    table.insert(waypoints, waypoint)
+                end
+                
+                return waypoints
+            end
+            
+            -- Function to move between waypoints
+            local function moveToWaypoints(waypoints)
+                for _, waypoint in ipairs(waypoints) do
+                    if not _G.SafeTeleportActive then break end
+                    
+                    -- Move to the waypoint
+                    local tweenInfo = TweenInfo.new(
+                        1, -- Duration of the tween (1 second)
+                        Enum.EasingStyle.Linear
+                    )
+                    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(waypoint)})
+                    tween:Play()
+                    
+                    -- Wait for the tween to complete
+                    tween.Completed:Wait()
+                    task.wait(0.5) -- Small delay between waypoints
+                end
+            end
+            
+            -- Calculate waypoints
+            local startPos = rootPart.Position
+            local waypoints = calculateWaypoints(startPos, targetPosition)
+            
+            -- Move between waypoints
+            moveToWaypoints(waypoints)
+            
+            -- Final position adjustment
             rootPart.CFrame = CFrame.new(targetPosition + Vector3.new(0, 5, 0)) -- 5 studs above the target
             task.wait(0.1) -- Small delay to stabilize
             rootPart.CFrame = CFrame.new(targetPosition) -- Move to the exact position
             
-            -- Small delay to avoid anti-cheat detection
-            task.wait(0.5)
-            
             -- Clean up and fade out black screen
             cleanUp()
             
-            -- Safety timeout (5 seconds max)
-            task.delay(5, function()
+            -- Safety timeout (10 seconds max)
+            task.delay(10, function()
                 if _G.SafeTeleportActive then
                     cleanUp()
                 end
