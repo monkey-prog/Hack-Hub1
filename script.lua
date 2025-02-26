@@ -1174,7 +1174,7 @@ local Dropdown = TeleportTab:CreateDropdown({
             -- Cancel existing teleport
             if _G.SafeTeleportActive then
                 _G.SafeTeleportActive = false
-                task.wait(1)
+                task.wait(0.5)
             end
             
             -- Set teleport flag
@@ -1208,23 +1208,24 @@ local Dropdown = TeleportTab:CreateDropdown({
             teleportingText.TextTransparency = 1
             teleportingText.Parent = blackFrame
             
+            -- Add the GUI to PlayerGui
             screenGui.Parent = player.PlayerGui
             
-            -- Fade in black screen and text
+            -- Fade in black screen and text immediately
             local fadeInTween = TweenService:Create(
                 blackFrame, 
-                TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+                TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
                 {BackgroundTransparency = 0}
             )
             local textFadeInTween = TweenService:Create(
                 teleportingText, 
-                TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+                TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
                 {TextTransparency = 0}
             )
             
             fadeInTween:Play()
             textFadeInTween:Play()
-            task.wait(0.6) -- Wait for fade to complete + small buffer
+            fadeInTween.Completed:Wait()
             
             -- Save original humanoid properties
             local originalWalkSpeed = humanoid.WalkSpeed
@@ -1244,7 +1245,7 @@ local Dropdown = TeleportTab:CreateDropdown({
                     end
                 end
                 
-                -- Keep velocity consistent and low to avoid speed detection
+                -- Keep velocity at zero
                 if rootPart then
                     rootPart.Velocity = Vector3.new(0, 0, 0)
                     rootPart.RotVelocity = Vector3.new(0, 0, 0)
@@ -1287,142 +1288,37 @@ local Dropdown = TeleportTab:CreateDropdown({
                 end)
             end
             
-            -- Calculate safe teleport segments
-            local function calculateSafeSegments(startPos, endPos)
-                local segments = {}
-                local distanceVector = endPos - startPos
-                local totalDistance = distanceVector.Magnitude
+            -- Instant teleport function
+            local function instantTeleport(targetPos)
+                -- Keep the screen black during the entire teleport
+                task.wait(0.5) -- Small buffer for stability
                 
-                -- Calculate how many segments based on distance
-                -- Using smaller segments (10-15 studs) to avoid detection
-                local maxSegmentSize = 15
-                local numSegments = math.ceil(totalDistance / maxSegmentSize)
+                -- Direct teleport to destination without intermediate steps
+                rootPart.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+                task.wait(0.2) -- Brief pause for stability
+                rootPart.CFrame = CFrame.new(targetPos)
                 
-                -- Ensure minimum number of segments for long distances
-                numSegments = math.max(numSegments, 5)
+                -- Ensure we're not stuck in anything
+                task.wait(0.3)
                 
-                -- Create segments with consistent spacing
-                for i = 1, numSegments do
-                    local fraction = i / numSegments
-                    local segmentPos = startPos:Lerp(endPos, fraction)
-                    
-                    -- Check for terrain or parts
-                    local raycastParams = RaycastParams.new()
-                    raycastParams.FilterDescendantsInstances = {character}
-                    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-                    
-                    -- Add some height variation to avoid simple pattern detection
-                    local heightOffset = math.sin(i * 0.5) * 2
-                    segmentPos = segmentPos + Vector3.new(0, heightOffset, 0)
-                    
-                    table.insert(segments, segmentPos)
-                end
-                
-                return segments
-            end
-            
-            -- Execute teleportation with consistent speed
-            local function safelyTeleport(segments)
-                -- Calculate a consistent speed that's not too fast to trigger kicks
-                -- Lower teleport speed to avoid detection
-                local teleportSpeed = 12 -- Lower speed (studs per second)
-                
-                for i, segmentPos in ipairs(segments) do
-                    if not _G.SafeTeleportActive then break end
-                    
-                    -- Update teleport text to show progress
-                    teleportingText.Text = "Teleporting... " .. math.floor((i / #segments) * 100) .. "%"
-                    
-                    local currentPos = rootPart.Position
-                    local distance = (segmentPos - currentPos).Magnitude
-                    local duration = distance / teleportSpeed -- Consistent speed
-                    
-                    -- Create CFrame for this segment
-                    local targetCFrame = CFrame.new(segmentPos)
-                    
-                    -- Use CFrame tween for smoother movement
-                    local moveTween = TweenService:Create(
-                        rootPart,
-                        TweenInfo.new(
-                            duration,
-                            Enum.EasingStyle.Linear, -- Linear for consistent speed
-                            Enum.EasingDirection.InOut
-                        ),
-                        {CFrame = targetCFrame}
-                    )
-                    
-                    moveTween:Play()
-                    
-                    -- Wait for tween to complete
-                    moveTween.Completed:Wait()
-                    
-                    -- Small pause to stabilize between segments and avoid rapid successive movements
-                    task.wait(0.1)
-                end
-            end
-            
-            -- Final positioning function to avoid getting stuck
-            local function finalPositioning(targetPos)
-                -- Check if there's something at the target position
-                local raycastParams = RaycastParams.new()
-                raycastParams.FilterDescendantsInstances = {character}
-                raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-                
-                -- Cast rays in different directions to find safe spot
-                local directions = {
-                    Vector3.new(0, 1, 0),   -- Up
-                    Vector3.new(1, 0, 0),   -- Right
-                    Vector3.new(-1, 0, 0),  -- Left
-                    Vector3.new(0, 0, 1),   -- Forward
-                    Vector3.new(0, 0, -1)   -- Back
-                }
-                
-                -- Default to slightly above target if no safe spot found
-                local finalPos = targetPos + Vector3.new(0, 3, 0)
-                
-                -- Try to find a safe position
-                for _, dir in ipairs(directions) do
-                    local testPos = targetPos + (dir * 3) -- Test 3 studs in each direction
-                    local result = workspace:Raycast(testPos, Vector3.new(0, -10, 0), raycastParams)
-                    
-                    if result then
-                        -- Found a safe spot above solid ground
-                        finalPos = result.Position + Vector3.new(0, 3, 0) -- 3 studs above the ground
-                        break
-                    end
-                end
-                
-                -- Final teleport to the safe position
-                rootPart.CFrame = CFrame.new(finalPos)
-                
-                -- Let physics settle briefly
-                task.wait(0.2)
-                
-                -- Make sure we're not inside anything
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = true
-                    end
-                end
+                -- Additional delay before revealing screen to ensure everything is loaded
+                task.wait(0.5)
             end
             
             -- Main teleport sequence
             task.spawn(function()
-                local startPos = rootPart.Position
-                local segments = calculateSafeSegments(startPos, targetPosition)
+                -- Keep the black screen during the entire process
+                teleportingText.Text = "Teleporting to " .. selectedLocation .. "..."
                 
-                -- Teleport through segments
-                safelyTeleport(segments)
+                -- Perform the instant teleport
+                instantTeleport(targetPosition)
                 
-                -- Final positioning to avoid being stuck
-                finalPositioning(targetPosition)
-                
-                -- Re-enable all character functionality
+                -- Clean up after teleport is complete
                 cleanUp()
             end)
             
-            -- Safety timeout (15 seconds max)
-            task.delay(15, function()
+            -- Safety timeout (5 seconds max)
+            task.delay(5, function()
                 if _G.SafeTeleportActive then
                     cleanUp()
                 end
@@ -1432,6 +1328,7 @@ local Dropdown = TeleportTab:CreateDropdown({
         end
     end,
 })
+
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
 local MiscSection = MiscTab:CreateSection("Misc")
 
