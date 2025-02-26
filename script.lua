@@ -1124,175 +1124,167 @@ local Toggle = MainTab:CreateToggle({
 local TeleportTab = Window:CreateTab("🌀Teleport", nil) -- Title, Image
 local TeleportSection = TeleportTab:CreateSection("Teleport")
 
--- Teleport function
-local function TeleportPlayerTo(targetPosition)
-    local player = Players.LocalPlayer
-    local character = player.Character
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
-    if not character then
-        warn("Character not found!")
-        return
-    end
-
-    local humanoid = character:FindFirstChild("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-
-    if not humanoid or not rootPart then
-        warn("Humanoid or HumanoidRootPart not found!")
-        return
-    end
-
-    -- Cancel existing teleport
-    if _G.SafeTeleportActive then
-        _G.SafeTeleportActive = false
-        task.wait(0.5)
-    end
-
-    _G.SafeTeleportActive = true
-
-    -- Create transition UI
-    local screenGui, blackFrame, teleportingText = CreateTransitionUI(player, option)
-
-    -- Fade in transition
-    FadeInTransition(blackFrame, teleportingText)
-
-    -- Save original humanoid properties
-    local originalWalkSpeed = humanoid.WalkSpeed
-    local originalJumpPower = humanoid.JumpPower
-
-    -- Disable character controls during teleport
-    humanoid.WalkSpeed = 0
-    humanoid.JumpPower = 0
-
-    -- Enable noclip
-    local noclipConnection = EnableNoclip(character, rootPart)
-
-    -- Function to clean up after teleporting
-    local function cleanUp()
-        _G.SafeTeleportActive = false
-        noclipConnection:Disconnect()
-        humanoid.WalkSpeed = originalWalkSpeed
-        humanoid.JumpPower = originalJumpPower
-        FadeOutTransition(blackFrame, teleportingText, screenGui)
-    end
-
-    -- Perform teleportation
-    task.spawn(function()
-        task.wait(0.5) -- Small buffer for stability
-        rootPart.CFrame = CFrame.new(targetPosition)
-
-        -- Check if position is valid
-        if (rootPart.Position - targetPosition).Magnitude > 10 then
-            rootPart.Anchored = true
-            rootPart.CFrame = CFrame.new(targetPosition)
-            task.wait(0.1)
-            rootPart.Anchored = false
-        end
-
-        -- Wait to ensure teleport completes
-        task.wait(0.5)
-
-        -- Clean up after teleport is complete
-        cleanUp()
-    end)
-
-    -- Safety timeout
-    task.delay(TELEPORT_TIMEOUT, function()
-        if _G.SafeTeleportActive then
-            warn("Teleport timed out, forcing cleanup")
-            cleanUp()
-        end
-    end)
-end
-
--- Create transition UI
-local function CreateTransitionUI(player, locationName)
+-- Create a black transition screen UI
+local function createTransitionScreen(locationName)
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "TeleportTransition"
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.DisplayOrder = 999
-    screenGui.IgnoreGuiInset = true
-    screenGui.Parent = player.PlayerGui
-
-    local blackFrame = Instance.new("Frame")
-    blackFrame.Name = "BlackTransition"
-    blackFrame.Size = UDim2.new(1, 0, 1, 0)
-    blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-    blackFrame.BackgroundTransparency = 1
-    blackFrame.BorderSizePixel = 0
-    blackFrame.Parent = screenGui
-
-    local teleportingText = Instance.new("TextLabel")
-    teleportingText.Name = "TeleportingText"
-    teleportingText.Size = UDim2.new(1, 0, 0.1, 0)
-    teleportingText.Position = UDim2.new(0, 0, 0.45, 0)
-    teleportingText.BackgroundTransparency = 1
-    teleportingText.Text = "Teleporting to " .. locationName .. "..."
-    teleportingText.TextColor3 = Color3.new(1, 1, 1)
-    teleportingText.TextSize = 24
-    teleportingText.Font = Enum.Font.SourceSansBold
-    teleportingText.TextTransparency = 1
-    teleportingText.Parent = blackFrame
-
-    return screenGui, blackFrame, teleportingText
+    
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BackgroundTransparency = 1
+    frame.Parent = screenGui
+    
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 0, 50)
+    textLabel.Position = UDim2.new(0, 0, 0.5, -25)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.TextSize = 24
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.Text = "Teleporting to " .. locationName .. "..."
+    textLabel.TextTransparency = 1
+    textLabel.Parent = frame
+    
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Fade in animation
+    local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    local fadeIn = TweenService:Create(frame, tweenInfo, {BackgroundTransparency = 0})
+    local textFadeIn = TweenService:Create(textLabel, tweenInfo, {TextTransparency = 0})
+    
+    fadeIn:Play()
+    textFadeIn:Play()
+    
+    return screenGui
 end
 
--- Fade in transition
-local function FadeInTransition(blackFrame, teleportingText)
-    local fadeInTween = TweenService:Create(
-        blackFrame,
-        TweenInfo.new(FADE_IN_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-        { BackgroundTransparency = 0 }
-    )
-    local textFadeInTween = TweenService:Create(
-        teleportingText,
-        TweenInfo.new(FADE_IN_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-        { TextTransparency = 0 }
-    )
-    fadeInTween:Play()
-    textFadeInTween:Play()
-end
-
--- Fade out transition
-local function FadeOutTransition(blackFrame, teleportingText, screenGui)
-    local fadeOutTween = TweenService:Create(
-        blackFrame,
-        TweenInfo.new(FADE_OUT_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
-        { BackgroundTransparency = 1 }
-    )
-    local textFadeOutTween = TweenService:Create(
-        teleportingText,
-        TweenInfo.new(FADE_OUT_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
-        { TextTransparency = 1 }
-    )
-
-    fadeOutTween:Play()
-    textFadeOutTween:Play()
-
-    -- Remove screen GUI after fade out
-    task.delay(FADE_OUT_DURATION + 0.1, function()
-        if screenGui and screenGui.Parent then
-            screenGui:Destroy()
-        end
+-- Remove the transition screen with fade out
+local function removeTransitionScreen(screenGui)
+    local frame = screenGui:FindFirstChild("Frame")
+    local textLabel = frame:FindFirstChild("TextLabel")
+    
+    local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+    local fadeOut = TweenService:Create(frame, tweenInfo, {BackgroundTransparency = 1})
+    local textFadeOut = TweenService:Create(textLabel, tweenInfo, {TextTransparency = 1})
+    
+    fadeOut:Play()
+    textFadeOut:Play()
+    
+    fadeOut.Completed:Connect(function()
+        screenGui:Destroy()
     end)
 end
 
--- Enable noclip
-local function EnableNoclip(character, rootPart)
-    return RunService.Stepped:Connect(function()
-        if not _G.SafeTeleportActive then return end
-
-        for _, part in pairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
+-- No-clip function that prevents collisions during teleport
+local function enableNoClip()
+    local noclipConnection
+    noclipConnection = RunService.Stepped:Connect(function()
+        if Character and Character:FindFirstChild("Humanoid") then
+            for _, part in pairs(Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
             end
+        else
+            noclipConnection:Disconnect()
         end
-
-        -- Keep velocity at zero to prevent physics issues
-        rootPart.Velocity = Vector3.new(0, 0, 0)
-        rootPart.RotVelocity = Vector3.new(0, 0, 0)
     end)
-endhumanoid.WalkSpeed
+    return noclipConnection
+end
+
+-- Complete the teleport callback function
+local function teleportPlayer(selectedLocation, position)
+    -- Create transition screen
+    local transitionScreen = createTransitionScreen(selectedLocation)
+    
+    -- Enable no-clip
+    local noclipConnection = enableNoClip()
+    
+    -- Wait a moment for transition screen to appear
+    task.wait(0.6)
+    
+    -- Calculate distance and duration based on max speed of 30
+    local distance = (position - HumanoidRootPart.Position).Magnitude
+    local duration = distance / 30 -- Max speed of 30 studs per second
+    
+    -- Create tween for smooth movement
+    local tweenInfo = TweenInfo.new(
+        duration,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.Out,
+        0, -- No repeats
+        false, -- Don't reverse
+        0 -- No delay
+    )
+    
+    local tween = TweenService:Create(HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(position)})
+    
+    -- Make character invulnerable during teleport
+    local humanoid = Character:FindFirstChild("Humanoid")
+    local oldInvulnerable
+    if humanoid then
+        oldInvulnerable = humanoid.BreakJointsOnDeath
+        humanoid.BreakJointsOnDeath = false
+    end
+    
+    -- Connect to tween completion
+    tween.Completed:Connect(function()
+        -- Restore character properties
+        if humanoid and humanoid.Parent then
+            humanoid.BreakJointsOnDeath = oldInvulnerable
+        end
+        
+        -- Disconnect no-clip
+        if noclipConnection then
+            noclipConnection:Disconnect()
+        end
+        
+        -- Remove transition screen
+        removeTransitionScreen(transitionScreen)
+    end)
+    
+    -- Start the tween
+    tween:Play()
+end
+
+-- Now update your teleport callback in the dropdown
+Callback = function(Option)
+    -- Check if a location was selected
+    if #Option == 0 then
+        return -- No location selected, do nothing
+    end
+    
+    -- Get the selected location from the dropdown
+    local selectedLocation = Option[1]
+    
+    -- Define all teleport positions
+    local teleportLocations = {
+        ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+        ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+        ["Ice Box"] = Vector3.new(-202, 283, -1169),
+        ["Land Lord"] = Vector3.new(-209, 283, -1240),
+        ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+        ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+        ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+    }
+    
+    -- Get the target position
+    local targetPosition = teleportLocations[selectedLocation]
+    
+    -- Teleport to the selected location
+    if targetPosition then
+        teleportPlayer(selectedLocation, targetPosition)
+    end
+end
 
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
 local MiscSection = MiscTab:CreateSection("Misc")
