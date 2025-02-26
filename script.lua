@@ -1126,250 +1126,175 @@ local TeleportSection = TeleportTab:CreateSection("Teleport")
 
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-
--- Ensure we have the TeleportTab reference
--- If TeleportTab is not defined elsewhere, make sure to define it
--- TeleportTab = TeleportTab or Window:CreateTab("Teleport")
 
 local Dropdown = TeleportTab:CreateDropdown({
-   Name = "Teleport Locations",
-   Options = {
-       "Construction Job",
-       "Warehouse",
-       "Ice Box",
-       "Land Lord",
-       "Pawn Shop",
-       "Car Dealership", 
-       "McDonalds Job"
-   },
-   CurrentOption = {}, -- Empty table means no initial selection
-   MultipleOptions = false,
-   Flag = "TeleportLocation",
-   Callback = function(Option)
-       -- Proper error handling for Rayfield
-       pcall(function()
-           -- Check if a location was selected
-           if not Option or #Option == 0 then
-               return -- No location selected, do nothing
-           end
-           
-           -- Get the selected location from the dropdown
-           local selectedLocation = Option[1]
-           
-           -- Define all teleport positions
-           local teleportLocations = {
-               ["Construction Job"] = Vector3.new(-1729, 370, -1171),
-               ["Warehouse"] = Vector3.new(-1563, 258, -1174),
-               ["Ice Box"] = Vector3.new(-202, 283, -1169),
-               ["Land Lord"] = Vector3.new(-209, 283, -1240),
-               ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
-               ["Car Dealership"] = Vector3.new(-374, 253, -1247),
-               ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
-           }
-           
-           -- Get the target position for teleportation
-           local targetPosition = teleportLocations[selectedLocation]
-           
-           -- Make sure the position exists
-           if not targetPosition then
-               warn("Invalid teleport location selected: " .. tostring(selectedLocation))
-               return
-           end
-           
-           local player = LocalPlayer
-           local character = player.Character
-           
-           if not character then
-               warn("Character not found")
-               return
-           end
-           
-           local humanoid = character:FindFirstChild("Humanoid")
-           local rootPart = character:FindFirstChild("HumanoidRootPart")
-           
-           if not humanoid or not rootPart then
-               warn("Humanoid or HumanoidRootPart not found")
-               return
-           end
-           
-           -- Cancel existing teleport
-           if _G.SafeTeleportActive then
-               _G.SafeTeleportActive = false
-               task.wait(0.5)
-           end
-           
-           -- Set teleport flag
-           _G.SafeTeleportActive = true
-           
-           -- Store original states
-           local originalWalkSpeed = humanoid.WalkSpeed
-           local originalJumpPower = humanoid.JumpPower
-           local originalAutoRotate = humanoid.AutoRotate
-           local originalPlatformStand = humanoid.PlatformStand
-           local originalCanCollide = {}
-           
-           for _, part in pairs(character:GetDescendants()) do
-               if part:IsA("BasePart") then
-                   originalCanCollide[part] = part.CanCollide
-               end
-           end
-           
-           -- Create a black screen transition
-           local screenGui = Instance.new("ScreenGui")
-           screenGui.Name = "TeleportTransition"
-           screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-           screenGui.DisplayOrder = 999
-           screenGui.IgnoreGuiInset = true
-           
-           local blackFrame = Instance.new("Frame")
-           blackFrame.Name = "BlackTransition"
-           blackFrame.Size = UDim2.new(1, 0, 1, 0)
-           blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-           blackFrame.BackgroundTransparency = 1
-           blackFrame.BorderSizePixel = 0
-           blackFrame.Parent = screenGui
-           
-           -- Safely adding the GUI
-           pcall(function()
-               screenGui.Parent = player:FindFirstChild("PlayerGui")
-           end)
-           
-           -- If PlayerGui failed, try coregui
-           if not screenGui.Parent then
-               pcall(function()
-                   screenGui.Parent = game:GetService("CoreGui")
-               end)
-           end
-           
-           -- If still failed, abort with warning
-           if not screenGui.Parent then
-               warn("Failed to create transition screen")
-               _G.SafeTeleportActive = false
-               return
-           end
-           
-           -- Freeze player during teleport
-           local function freezeCharacter()
-               if not _G.SafeTeleportActive then return end
-               
-               -- Apply noclip
-               for _, part in pairs(character:GetDescendants()) do
-                   if part:IsA("BasePart") then
-                       part.CanCollide = false
-                   end
-               end
-               
-               -- Freeze character physics
-               if rootPart then
-                   rootPart.Velocity = Vector3.new(0, 0, 0)
-                   rootPart.RotVelocity = Vector3.new(0, 0, 0)
-               end
-               
-               -- Pause humanoid states
-               humanoid.PlatformStand = true
-               humanoid.AutoRotate = false
-               humanoid.JumpPower = 0
-               humanoid.WalkSpeed = 0
-           end
-           
-           -- Enable noclip with absolute collision prevention
-           local noclipConnection = RunService.Stepped:Connect(freezeCharacter)
-           local heartbeatConnection = RunService.Heartbeat:Connect(freezeCharacter)
-           
-           -- Function to clean up
-           local function cleanUp()
-               _G.SafeTeleportActive = false
-               
-               -- Disconnect event connections
-               if noclipConnection then
-                   noclipConnection:Disconnect()
-                   noclipConnection = nil
-               end
-               
-               if heartbeatConnection then
-                   heartbeatConnection:Disconnect()
-                   heartbeatConnection = nil
-               end
-               
-               -- Restore character properties (safely)
-               pcall(function()
-                   if humanoid and humanoid.Parent then
-                       humanoid.WalkSpeed = originalWalkSpeed
-                       humanoid.JumpPower = originalJumpPower
-                       humanoid.AutoRotate = originalAutoRotate
-                       humanoid.PlatformStand = false
-                       humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-                   end
-               end)
-               
-               -- Restore collision
-               pcall(function()
-                   for part, value in pairs(originalCanCollide) do
-                       if part and part:IsA("BasePart") and part.Parent then
-                           part.CanCollide = value
-                       end
-                   end
-               end)
-               
-               -- Fade out black screen
-               pcall(function()
-                   local fadeOutTween = TweenService:Create(
-                       blackFrame, 
-                       TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), 
-                       {BackgroundTransparency = 1}
-                   )
-                   
-                   fadeOutTween:Play()
-                   
-                   -- Remove screen GUI after fade out
-                   task.delay(0.6, function()
-                       if screenGui and screenGui.Parent then
-                           screenGui:Destroy()
-                       end
-                   end)
-               end)
-           end
-           
-           -- Direct teleport
-           local function directTeleport()
-               -- Freeze the player
-               freezeCharacter()
-               
-               -- Fade in black screen
-               local fadeInTween = TweenService:Create(
-                   blackFrame, 
-                   TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
-                   {BackgroundTransparency = 0}
-               )
-               
-               fadeInTween:Play()
-               task.wait(0.55) -- Wait for fade to complete
-               
-               -- Apply teleport while screen is black
-               pcall(function()
-                   rootPart.CFrame = CFrame.new(targetPosition)
-               end)
-               
-               -- Small wait to ensure rendering has caught up
-               task.wait(0.2)
-               
-               -- Clean up and fade out black screen
-               cleanUp()
-           end
-           
-           -- Start the teleport
-           directTeleport()
-           
-           -- Safety timeout (5 seconds max)
-           task.delay(5, function()
-               if _G.SafeTeleportActive then
-                   cleanUp()
-               end
-           end)
-       end)
-   end,
+    Name = "Teleport Locations",
+    Options = {
+        "Construction Job",
+        "Warehouse",
+        "Ice Box",
+        "Land Lord",
+        "Pawn Shop",
+        "Car Dealership", 
+        "McDonalds Job"
+    },
+    CurrentOption = {}, -- Empty table means no initial selection
+    MultipleOptions = false,
+    Flag = "TeleportLocation",
+    Callback = function(Option)
+        -- Check if a location was selected
+        if #Option == 0 then
+            return -- No location selected, do nothing
+        end
+        
+        -- Get the selected location from the dropdown
+        local selectedLocation = Option[1]
+        
+        -- Define all teleport positions
+        local teleportLocations = {
+            ["Construction Job"] = Vector3.new(-1729, 370, -1171),
+            ["Warehouse"] = Vector3.new(-1563, 258, -1174),
+            ["Ice Box"] = Vector3.new(-202, 283, -1169),
+            ["Land Lord"] = Vector3.new(-209, 283, -1240),
+            ["Pawn Shop"] = Vector3.new(-1052, 253, -808),
+            ["Car Dealership"] = Vector3.new(-374, 253, -1247),
+            ["McDonalds Job"] = Vector3.new(-385, 253, -1100)
+        }
+        
+        -- Get the target position for teleportation
+        local targetPosition = teleportLocations[selectedLocation]
+        
+        -- Make sure the position exists
+        if targetPosition then
+            local player = game.Players.LocalPlayer
+            local character = player.Character or player.CharacterAdded:Wait()
+            local humanoid = character:WaitForChild("Humanoid")
+            local rootPart = character:WaitForChild("HumanoidRootPart")
+            
+            -- Cancel existing teleport
+            if _G.SafeTeleportActive then
+                _G.SafeTeleportActive = false
+                task.wait(1)
+            end
+            
+            -- Set teleport flag
+            _G.SafeTeleportActive = true
+            
+            -- Create a black screen transition
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "TeleportTransition"
+            screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            screenGui.DisplayOrder = 999
+            screenGui.IgnoreGuiInset = true
+            
+            local blackFrame = Instance.new("Frame")
+            blackFrame.Name = "BlackTransition"
+            blackFrame.Size = UDim2.new(1, 0, 1, 0)
+            blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+            blackFrame.BackgroundTransparency = 1
+            blackFrame.BorderSizePixel = 0
+            blackFrame.Parent = screenGui
+            
+            -- Add "Teleporting..." text
+            local teleportingText = Instance.new("TextLabel")
+            teleportingText.Name = "TeleportingText"
+            teleportingText.Size = UDim2.new(1, 0, 0.1, 0)
+            teleportingText.Position = UDim2.new(0, 0, 0.45, 0)
+            teleportingText.BackgroundTransparency = 1
+            teleportingText.Text = "Teleporting..."
+            teleportingText.TextColor3 = Color3.new(1, 1, 1)
+            teleportingText.TextSize = 24
+            teleportingText.Font = Enum.Font.SourceSansBold
+            teleportingText.TextTransparency = 1
+            teleportingText.Parent = blackFrame
+            
+            screenGui.Parent = player.PlayerGui
+            
+            -- Fade in black screen and text
+            local tweenService = game:GetService("TweenService")
+            local fadeInTween = tweenService:Create(
+                blackFrame, 
+                TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+                {BackgroundTransparency = 0}
+            )
+            local textFadeInTween = tweenService:Create(
+                teleportingText, 
+                TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), 
+                {TextTransparency = 0}
+            )
+            
+            fadeInTween:Play()
+            textFadeInTween:Play()
+            task.wait(0.6) -- Wait for fade to complete + small buffer
+            
+            -- Enable noclip with absolute collision prevention
+            local noclipConnection = RunService.Stepped:Connect(function()
+                if not _G.SafeTeleportActive then return end
+                
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+                
+                -- Freeze character physics to prevent movement
+                if rootPart then
+                    rootPart.Velocity = Vector3.new(0, 0, 0)
+                    rootPart.RotVelocity = Vector3.new(0, 0, 0)
+                end
+            end)
+            
+            -- Function to clean up
+            local function cleanUp()
+                _G.SafeTeleportActive = false
+                
+                if noclipConnection then
+                    noclipConnection:Disconnect()
+                    noclipConnection = nil
+                end
+                
+                -- Fade out black screen and text
+                local fadeOutTween = tweenService:Create(
+                    blackFrame, 
+                    TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), 
+                    {BackgroundTransparency = 1}
+                )
+                local textFadeOutTween = tweenService:Create(
+                    teleportingText, 
+                    TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), 
+                    {TextTransparency = 1}
+                )
+                
+                fadeOutTween:Play()
+                textFadeOutTween:Play()
+                
+                -- Remove screen GUI after fade out
+                task.delay(0.6, function()
+                    if screenGui and screenGui.Parent then
+                        screenGui:Destroy()
+                    end
+                end)
+            end
+            
+            -- Direct teleport while screen is black
+            rootPart.CFrame = CFrame.new(targetPosition)
+            
+            -- Small wait to ensure rendering has caught up
+            task.wait(0.2)
+            
+            -- Clean up and fade out black screen
+            cleanUp()
+            
+            -- Safety timeout (5 seconds max)
+            task.delay(5, function()
+                if _G.SafeTeleportActive then
+                    cleanUp()
+                end
+            end)
+        else
+            warn("Invalid teleport location selected: " .. selectedLocation)
+        end
+    end,
 })
 
 local MiscTab = Window:CreateTab("📢Misc", nil) -- Title, Image
